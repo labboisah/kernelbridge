@@ -1,0 +1,19 @@
+/var/www/alignex/shared/storage/logs/*.log
+/var/www/edunexa/shared/storage/logs/*.log
+/var/www/mediflow/shared/storage/logs/*.log
+/var/www/marketlens/shared/storage/logs/*.log
+/var/www/staycontrol/shared/storage/logs/*.log
+/var/log/supervisor/alignex-worker.log
+/var/log/supervisor/edunexa-worker.log
+/var/log/supervisor/mediflow-worker.log
+/var/log/supervisor/marketlens-worker.log
+/var/log/supervisor/staycontrol-worker.log {
+    daily
+    missingok
+    rotate 14
+    compress
+    delaycompress
+    notifempty
+    copytruncate
+    create 0640 root adm
+}

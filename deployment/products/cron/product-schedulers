@@ -1,0 +1,5 @@
+* * * * * alignex cd /var/www/alignex/current && /usr/bin/php artisan schedule:run >> /dev/null 2>&1
+* * * * * edunexa cd /var/www/edunexa/current && /usr/bin/php artisan schedule:run >> /dev/null 2>&1
+* * * * * mediflow cd /var/www/mediflow/current && /usr/bin/php artisan schedule:run >> /dev/null 2>&1
+* * * * * marketlens cd /var/www/marketlens/current && /usr/bin/php artisan schedule:run >> /dev/null 2>&1
+* * * * * staycontrol cd /var/www/staycontrol/current && /usr/bin/php artisan schedule:run >> /dev/null 2>&1

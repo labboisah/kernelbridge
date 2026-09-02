@@ -1,0 +1,86 @@
+openapi: 3.1.0
+info:
+  title: KernelBridge Product Integration API
+  version: 1.0.0
+  description: Machine-to-machine API for authorized KernelBridge products.
+servers:
+  - url: https://kernelbridge.com/api/v1
+security:
+  - bearerAuth: []
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: KernelBridge client credential
+  schemas:
+    Error:
+      type: object
+      required: [success, error, meta]
+      properties:
+        success: { type: boolean, const: false }
+        error:
+          type: object
+          properties:
+            code: { type: string }
+            message: { type: string }
+            details: { type: object }
+        meta:
+          type: object
+          properties:
+            request_id: { type: string, format: uuid }
+paths:
+  /products/{code}:
+    get:
+      summary: Retrieve the authenticated client's product
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+      responses: { '200': { description: Product }, '401': { description: Invalid credential } }
+  /licenses/activate:
+    post:
+      summary: Activate a license for a device
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [license_key, device_id], properties: { license_key: { type: string }, device_id: { type: string }, device_name: { type: string } } } } } }
+      responses: { '201': { description: Activated }, '422': { description: Invalid license } }
+  /licenses/verify:
+    post:
+      summary: Verify an active device license
+      responses: { '200': { description: Verified } }
+  /licenses/deactivate:
+    post:
+      summary: Deactivate a device license
+      responses: { '200': { description: Deactivated } }
+  /subscriptions/status:
+    get:
+      summary: Retrieve subscription status
+      parameters:
+        - { name: subscription_uuid, in: query, required: true, schema: { type: string, format: uuid } }
+      responses: { '200': { description: Subscription status } }
+  /entitlements:
+    get:
+      summary: Retrieve current snapshotted entitlements
+      parameters:
+        - { name: subscription_uuid, in: query, required: true, schema: { type: string, format: uuid } }
+      responses: { '200': { description: Entitlements } }
+  /demo/events:
+    post:
+      summary: Submit an idempotent product demo event
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [session_uuid, event_id, event_type, occurred_at], properties: { session_uuid: { type: string, format: uuid }, event_id: { type: string }, event_type: { type: string, enum: [session_start, page_view, feature_used, workflow_completed, cta_clicked, request_full_version, session_end] }, page: { type: string }, feature: { type: string }, cta: { type: string }, occurred_at: { type: string, format: date-time }, metadata: { type: object } } } } } }
+      responses: { '202': { description: Accepted }, '422': { description: Invalid or duplicate event } }
+  /demo/config:
+    get:
+      summary: Retrieve versioned Demo Mode restrictions and reset instructions
+      responses: { '200': { description: Demo configuration }, '404': { description: No active profile } }
+  /demo/sessions:
+    post:
+      summary: Start an anonymous demo session
+      responses: { '201': { description: Session started }, '422': { description: Invalid or exhausted access token } }
+  /demo/sessions/{session_uuid}/end:
+    post:
+      summary: End a demo session
+      parameters:
+        - { name: session_uuid, in: path, required: true, schema: { type: string, format: uuid } }
+      responses: { '200': { description: Session ended } }
+  /demo/resets/acknowledge:
+    post:
+      summary: Acknowledge local execution of the current reset instruction
+      responses: { '200': { description: Reset acknowledged }, '422': { description: Stale instruction version } }

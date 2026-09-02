@@ -1,0 +1,28 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+    html { scroll-behavior: smooth; }
+    body { @apply bg-[#F8FAFC] text-slate-900 antialiased; }
+    :focus-visible { @apply outline-none ring-2 ring-[#0797A5] ring-offset-2; }
+}
+
+@layer components {
+    .page-shell { @apply mx-auto max-w-7xl px-6; }
+    .page-hero { @apply bg-[#071426] py-20 text-white sm:py-28; }
+    .page-title { @apply max-w-4xl text-4xl font-bold tracking-tight sm:text-6xl; }
+    .page-intro { @apply mt-6 max-w-2xl text-lg leading-8 text-slate-300; }
+    .section-label { @apply text-sm font-bold uppercase tracking-[.18em] text-[#0797A5]; }
+    .section-title { @apply mt-3 text-3xl font-bold tracking-tight text-[#0B3D6E] sm:text-4xl; }
+    .section-copy { @apply mt-5 text-lg leading-8 text-slate-600; }
+    .form-card { @apply space-y-5 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8; }
+    .form-grid { @apply grid gap-5 sm:grid-cols-2; }
+    form label { @apply text-sm font-bold text-slate-700; }
+    .form-card label { @apply block; }
+    :where(input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='hidden']):not([type='button']):not([type='submit']):not([type='reset']), select, textarea) { @apply w-full rounded-xl border-slate-300 bg-white text-slate-900 shadow-sm transition-colors placeholder:text-slate-400 focus:border-[#0797A5] focus:ring-[#0797A5] disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500; }
+    .form-card :where(input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='hidden']):not([type='button']):not([type='submit']):not([type='reset']), select, textarea) { @apply mt-2; }
+    :where(input[type='checkbox'], input[type='radio']) { @apply m-0 h-4 w-4 shrink-0 border-slate-300 bg-white text-[#0797A5] shadow-sm focus:ring-[#0797A5]; }
+    .form-button { @apply rounded-xl bg-[#0797A5] px-6 py-3.5 font-bold text-white transition hover:bg-[#067f8b] disabled:cursor-not-allowed disabled:opacity-60; }
+    .success-message { @apply rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-semibold text-emerald-800; }
+}

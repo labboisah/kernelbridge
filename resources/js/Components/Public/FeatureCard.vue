@@ -1,0 +1,2 @@
+<script setup>defineProps({ title: String, description: String });</script>
+<template><article class="flex gap-4"><div class="mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-teal-50 text-[#0797A5]"><svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path d="m5 12 4 4L19 6" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/></svg></div><div><h3 class="font-bold text-[#0B3D6E]">{{ title }}</h3><p class="mt-1 leading-7 text-slate-600">{{ description }}</p></div></article></template>

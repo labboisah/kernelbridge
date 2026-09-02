@@ -1,0 +1,4 @@
+<script setup>
+import { Link } from '@inertiajs/vue3'; defineProps({customerId:{type:String,required:true},active:{type:String,required:true}}); const tabs=[['overview','Overview'],['contacts','Contacts'],['products','Products'],['subscriptions','Subscriptions'],['invoices','Invoices'],['payments','Payments'],['licenses','Licenses'],['support','Support'],['activity','Activity']];
+</script>
+<template><nav class="flex gap-1 overflow-x-auto border-b border-slate-200" aria-label="Customer details"><Link v-for="tab in tabs" :key="tab[0]" :href="route('admin.customers.show',{customer:customerId,tab:tab[0]})" preserve-scroll class="whitespace-nowrap border-b-2 px-4 py-3 text-sm font-bold" :class="active===tab[0]?'border-[#0797A5] text-[#0B3D6E]':'border-transparent text-slate-500 hover:text-slate-800'">{{ tab[1] }}</Link></nav></template>

@@ -1,0 +1,18 @@
+[{{APP}}]
+user = {{APP}}
+group = {{APP}}
+listen = /run/php/{{APP}}.sock
+listen.owner = www-data
+listen.group = www-data
+listen.mode = 0660
+pm = dynamic
+pm.max_children = 8
+pm.start_servers = 2
+pm.min_spare_servers = 1
+pm.max_spare_servers = 3
+pm.max_requests = 500
+php_admin_flag[display_errors] = off
+php_admin_value[error_log] = /var/log/php8.3-fpm-{{APP}}.log
+php_admin_value[upload_tmp_dir] = /var/www/{{APP}}/shared/storage/app/tmp
+php_admin_value[session.save_path] = /var/www/{{APP}}/shared/storage/framework/sessions
+env[APP_ENV] = production
