@@ -1,0 +1,49 @@
+{
+  "name": "@kernelbridge/licensing-mcp-server",
+  "version": "0.1.0",
+  "description": "MCP server foundation for KernelBridge licensing support, onboarding, operations, and documentation tools.",
+  "license": "UNLICENSED",
+  "type": "module",
+  "bin": {
+    "kernelbridge-licensing-mcp": "dist/server.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./server": {
+      "types": "./dist/server.d.ts",
+      "import": "./dist/server.js"
+    }
+  },
+  "files": [
+    "dist",
+    "deployment",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "restricted"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepack": "npm run build",
+    "pack:dry-run": "npm pack --dry-run",
+    "release:checksums": "node scripts/write-checksums.mjs",
+    "test": "tsc -p tsconfig.test.json && node --test dist-tests/test/*.test.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.17.4",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
+  }
+}

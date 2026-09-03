@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "kernelbridge-licensing": {
+      "command": "kernelbridge-licensing-mcp",
+      "env": {
+        "KERNELBRIDGE_API_URL": "https://kernelbridge.com/api/v1",
+        "KERNELBRIDGE_API_TOKEN": "replace-with-managed-support-mcp-token",
+        "KERNELBRIDGE_DOCS_ROOT": "/opt/kernelbridge/licensing-docs",
+        "KERNELBRIDGE_MCP_ALLOW_MUTATIONS": "false"
+      }
+    }
+  }
+}

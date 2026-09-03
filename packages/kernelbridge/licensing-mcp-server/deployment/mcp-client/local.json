@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "kernelbridge-licensing": {
+      "command": "node",
+      "args": ["C:/laragon/www/kernelbridge/packages/kernelbridge/licensing-mcp-server/dist/server.js"],
+      "env": {
+        "KERNELBRIDGE_API_URL": "http://127.0.0.1:8000/api/v1",
+        "KERNELBRIDGE_API_TOKEN": "replace-with-local-mcp-token",
+        "KERNELBRIDGE_DOCS_ROOT": "C:/laragon/www/kernelbridge",
+        "KERNELBRIDGE_MCP_ALLOW_MUTATIONS": "false"
+      }
+    }
+  }
+}
