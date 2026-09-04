@@ -1,0 +1,253 @@
+# KernelBridge Laravel Licensing Client
+
+This package is the reusable licensing boundary for AlignEx, EduNexa, MediFlow, MarketLens, StayControl, and future Laravel products. Product applications retain only a signed, encrypted local license snapshot; KernelBridge remains the source of truth.
+
+## Installation
+
+This is a private package and is not available from Packagist. Composer must first be told where to find it.
+
+### Local sibling application
+
+If the applications use this layout:
+
+```text
+C:\laragon\www\kernelbridge
+C:\laragon\www\staycontrol
+```
+
+run these commands from the client application, for example `C:\laragon\www\staycontrol`:
+
+```bash
+composer config repositories.kernelbridge path ../kernelbridge/packages/kernelbridge/licensing-client-laravel
+composer require kernelbridge/licensing-client-laravel:^1.0
+```
+
+Composer records the path repository in the client application's `composer.json`. The equivalent manual configuration is:
+
+```json
+{
+    "repositories": [
+        {
+            "type": "path",
+            "url": "../kernelbridge/packages/kernelbridge/licensing-client-laravel",
+            "options": { "symlink": true }
+        }
+    ]
+}
+```
+
+The repository URL is resolved relative to the client application's `composer.json`, not relative to the KernelBridge package. If the package is copied into the client project at `packages/kernelbridge/licensing-client-laravel`, use that path instead.
+
+Then finish the Laravel installation:
+
+```bash
+php artisan vendor:publish --tag=kernelbridge-licensing-config
+php artisan vendor:publish --tag=kernelbridge-licensing-migrations
+php artisan vendor:publish --tag=kernelbridge-licensing-assets
+php artisan migrate
+```
+
+The package auto-registers a minimal activation controller, routes, middleware aliases, Blade UI, and opt-in global request protection. Visit `/license` in the product app to activate, verify, or deactivate the local installation. Add KERNELBRIDGE_PROTECT_WEB_ROUTES=true to protect client app pages until activation succeeds.
+
+### Private Composer repository
+
+For production deployments, publish and tag this package as `1.0.0` in the private KernelBridge Composer/VCS repository, configure that repository in each product, and run:
+
+```bash
+composer require kernelbridge/licensing-client-laravel:^1.0
+```
+
+Do not use `minimum-stability: dev` as a workaround. The package now declares a stable `1.0.0` version for path-repository installations.
+
+Laravel package discovery registers the provider, migrations, default `/license` routes, the built-in activation controller, middleware aliases, publishable Blade UI, and scheduled verification job.
+
+## Environment
+
+```dotenv
+KERNELBRIDGE_API_URL=https://kernelbridge.com/api/v1
+KERNELBRIDGE_PRODUCT_CODE=ALIGNEX
+KERNELBRIDGE_API_TOKEN=replace-with-the-product-machine-token
+KERNELBRIDGE_API_CONNECT_TIMEOUT=3
+KERNELBRIDGE_API_TIMEOUT=10
+KERNELBRIDGE_VERIFICATION_INTERVAL=15
+KERNELBRIDGE_OFFLINE_GRACE_HOURS=72
+KERNELBRIDGE_CACHE_SIGNING_KEY=replace-with-an-independent-long-random-secret
+KERNELBRIDGE_PROTECT_WEB_ROUTES=true
+KERNELBRIDGE_PROTECT_EXCEPT=login,register,password/*
+KERNELBRIDGE_RENEWAL_NOTICE_ENABLED=true
+```
+
+Give every product and environment independent, least-privilege API credentials. Never commit tokens or the signing key. Rotate and revoke product tokens from KernelBridge when required.
+
+## Minimal built-in setup
+
+After publishing the config and running migrations, the default package routes are available at `/license`:
+
+```text
+GET /license          Show activation/status UI
+POST /license         Activate a license key
+POST /license/verify  Force verification
+DELETE /license       Deactivate this installation
+```
+
+Route and redirect settings can be changed in `config/kernelbridge-licensing.php`:
+
+```php
+'routes' => [
+    'enabled' => true,
+    'prefix' => 'license',
+    'name' => 'kernelbridge.license.',
+    'middleware' => ['web'],
+],
+
+'protection' => [
+    'web' => true,
+    'except' => ['login', 'register', 'password/*'],
+],
+
+'redirects' => [
+    'activation_route' => null,
+    'after_activation' => '/',
+],
+```
+
+To customize the default Blade screen or own the route definitions, publish them:
+
+```bash
+php artisan vendor:publish --tag=kernelbridge-licensing-views
+php artisan vendor:publish --tag=kernelbridge-licensing-routes
+php artisan vendor:publish --tag=kernelbridge-licensing-assets
+```
+
+Vue or React applications can keep the package routes as form endpoints, or replace the Blade view with their own page and call `LicenseActivationService`, `LicenseVerificationService`, and `LicenseCacheService` from app-owned controllers.
+
+## Activation and verification
+
+```php
+use KernelBridge\LicensingClient\Services\LicenseActivationService;
+use KernelBridge\LicensingClient\Services\LicenseVerificationService;
+
+$state = app(LicenseActivationService::class)->activate($licenseKey, 'AlignEx production');
+$state = app(LicenseVerificationService::class)->verify();
+$features = app(LicenseVerificationService::class)->getEntitlements();
+app(LicenseVerificationService::class)->deactivate();
+```
+
+`KernelBridgeLicenseClient` exposes `activate()`, `verify()`, `deactivate()`, and `getEntitlements()` for lower-level integrations. Prefer the services because they atomically maintain local state.
+
+## Re-activation and tamper handling
+
+The package fails closed and requires re-activation when any of these checks fail:
+
+- No local license has been activated.
+- The local license was deactivated, rejected, revoked, expired, or exceeded offline grace.
+- The signed entitlement payload was changed or cannot be decrypted.
+- Sensitive local configuration changed after activation.
+
+During activation and verification, the package stores a signed configuration fingerprint for `KERNELBRIDGE_API_URL`, `KERNELBRIDGE_PRODUCT_CODE`, `KERNELBRIDGE_API_TOKEN`, `APP_KEY`, and `KERNELBRIDGE_CACHE_SIGNING_KEY`. If those values are changed later, protected web routes redirect to `/license` and API requests fail with `402` until the installation is re-activated.
+
+Device activation limits are enforced by the central KernelBridge API. The product app sends its stable `installation_identifier`, product code, device name, and license key during activation. If the license has reached its allowed device count, KernelBridge rejects the request and the package shows an activation-limit message.
+
+## Route protection
+
+There are two supported ways to protect the Laravel app that installs this package.
+
+### Protect the whole client app
+
+Set `KERNELBRIDGE_PROTECT_WEB_ROUTES=true` to make normal client app pages redirect to `/license` until the installation is activated or re-activated. KernelBridge's customer service page generates this value for each registered service. The package automatically allows its own activation routes to pass through.
+
+Use `KERNELBRIDGE_PROTECT_EXCEPT` for public pages that must remain reachable before activation:
+
+```dotenv
+KERNELBRIDGE_PROTECT_WEB_ROUTES=true
+KERNELBRIDGE_PROTECT_EXCEPT=login,register,password/*
+KERNELBRIDGE_RENEWAL_NOTICE_ENABLED=true
+```
+
+### Protect selected routes manually
+
+Set `KERNELBRIDGE_PROTECT_WEB_ROUTES=false` or leave it unset if the client app should choose protected routes itself. Then add `kernelbridge.subscription.active` directly to the routes or route groups that require an activated license:
+
+```php
+Route::middleware('kernelbridge.subscription.active')->group(function () {
+    Route::get('/dashboard', DashboardController::class);
+    Route::get('/reports', ReportsController::class);
+});
+```
+
+### Using both together
+
+It is safe but redundant to enable `KERNELBRIDGE_PROTECT_WEB_ROUTES=true` and also add `kernelbridge.subscription.active` to individual routes. The request may be checked twice, but the result is the same: unactivated browser requests redirect to `/license`, JSON/API requests return `402`, and activated requests continue normally.
+
+Use manual middleware with global protection mainly for feature or limit checks:
+
+```php
+Route::middleware('kernelbridge.feature:finance')->group(function () {
+    Route::resource('invoices', InvoiceController::class);
+});
+
+Route::post('/users', StoreUserController::class)
+    ->middleware('kernelbridge.limit:max_users,25');
+```
+
+Use the limit middleware only when a static required quantity is appropriate. For live usage counts, resolve `LicenseCacheService`, read `limit('max_users')`, and compare it with an authoritative backend count inside the business transaction.
+
+
+## Renewal notices
+
+The package can warn the client app when an active license is due within about 3, 2, or 1 month. Access is not blocked by these warnings; they are for banners, dashboard alerts, emails, or support prompts inside the product app.
+
+```php
+$notice = app(\KernelBridge\LicensingClient\Services\LicenseCacheService::class)->renewalNotice();
+
+if ($notice) {
+    // ['level' => '2_months', 'message' => '...', 'expires_at' => '2026-12-31']
+}
+```
+
+Protected Laravel responses also include these headers when a notice is active:
+
+```text
+X-KernelBridge-Renewal-Notice-Level: 1_month
+X-KernelBridge-Renewal-Notice-Message: Your KernelBridge license expires...
+X-KernelBridge-Renewal-Expires-At: 2026-12-31
+```
+
+Set `KERNELBRIDGE_RENEWAL_NOTICE_ENABLED=false` to disable these helpers.
+
+## Local state and offline operation
+
+The package stores one row per product containing public license, activation, subscription, and installation identifiers; encrypted license key and entitlement payload; verification/expiry timestamps; and an HMAC signature. It never stores central database IDs.
+
+Normal requests read the local snapshot and do not call KernelBridge. The queued scheduled job refreshes the snapshot at `KERNELBRIDGE_VERIFICATION_INTERVAL`. Run both infrastructure processes:
+
+```bash
+php artisan queue:work --tries=3
+php artisan schedule:work
+```
+
+If KernelBridge returns a temporary network/5xx failure, a correctly signed snapshot remains usable only until the earlier of license expiry and offline grace expiry. Explicit rejection, revocation, expiry, deactivation, a changed payload, or an invalid signature fails closed. Configuration errors are not treated as outages.
+
+## Operational guidance
+
+- Back up the local application database, but treat KernelBridge as the licensing source of truth.
+- Protect `APP_KEY` and `KERNELBRIDGE_CACHE_SIGNING_KEY`; losing either can make the encrypted snapshot unreadable.
+- Monitor failed `VerifyLicenseJob` jobs and API connectivity.
+- Do not expose the local state model or entitlement payload through public controllers.
+- Check entitlements again inside sensitive service methods; route middleware is a convenience boundary, not the only authorization control.
+
+Run the package coverage from this repository with:
+
+```bash
+php artisan test --filter=LicensingClientTest
+```
+
+
+
+
+
+
+
+
+
+

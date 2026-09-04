@@ -79,6 +79,28 @@ final class CustomerPortalTest extends TestCase
         $this->get(route('portal.payments.index'))->assertOk()->assertInertia(fn (Assert $page) => $page->component('Customer/Payments/Index')->has('payments', 0));
     }
 
+    public function test_customer_services_include_client_app_setup_template_for_registered_services(): void
+    {
+        [$user, $customer] = $this->account('setup@example.com', 'KBT-CUS-000022');
+        $plan = Plan::query()->where('slug', 'basic')->firstOrFail();
+        $invoice = $this->invoice($customer, $user, 'KBT-INV-2026-000022');
+        $subscription = Subscription::factory()->create(['customer_id' => $customer->id, 'product_id' => $plan->product_id, 'plan_id' => $plan->id, 'invoice_id' => $invoice->id, 'status' => 'active', 'created_by' => $user->id]);
+        $this->artisan('licenses:issue', ['subscription' => $subscription->uuid])->assertSuccessful();
+
+        $this->actingAs($user)->get(route('portal.services.index'))->assertOk()->assertInertia(fn (Assert $page) => $page
+            ->component('Customer/Services/Index')
+            ->where('services.0.client_setup.product_code', $plan->product->code)
+            ->where('services.0.client_setup.api_url', rtrim((string) config('app.url'), '/').'/api/v1')
+            ->where('services.0.client_setup.has_license', true)
+            ->where('services.0.client_setup.env', fn (string $env): bool => str_contains($env, 'KERNELBRIDGE_PRODUCT_CODE='.$plan->product->code)
+                && str_contains($env, 'KERNELBRIDGE_API_TOKEN=replace-with-product-machine-token')
+                && str_contains($env, 'KERNELBRIDGE_CACHE_SIGNING_KEY=replace-with-independent-long-random-secret')
+                && str_contains($env, 'KERNELBRIDGE_PROTECT_WEB_ROUTES=true'))
+            ->where('services.0.client_setup.composer_commands', fn (string $commands): bool => str_contains($commands, 'composer require kernelbridge/licensing-client-laravel:^1.0'))
+            ->where('services.0.client_setup.route_middleware', fn (string $code): bool => str_contains($code, 'kernelbridge.subscription.active'))
+            ->where('services.0.client_setup.license_key', fn (?string $key): bool => is_string($key) && str_starts_with($key, 'KBT-')));
+    }
+
     public function test_customer_can_submit_payment_evidence_for_own_account(): void
     {
         Storage::fake('public');
@@ -221,3 +243,5 @@ final class CustomerPortalTest extends TestCase
         return Invoice::factory()->create(['customer_id' => $customer->id, 'invoice_number' => $number, 'status' => 'issued', 'total' => 1000, 'balance' => 1000, 'amount_paid' => 0, 'created_by' => $actor->id]);
     }
 }
+
+

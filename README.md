@@ -112,5 +112,40 @@ Use `php artisan optimize:clear` when troubleshooting stale configuration or rou
 - [Customer onboarding](docs/CUSTOMER_ONBOARDING.md)
 - [Production deployment](docs/PRODUCTION_DEPLOYMENT.md)
 - [Multi-product infrastructure](docs/MULTI_PRODUCT_INFRASTRUCTURE.md)
+- [Licensing client spec](docs/LICENSING_CLIENT_SPEC.md)
+- [Laravel licensing client](docs/LICENSING_CLIENT.md)
+- [TypeScript licensing client](docs/TYPESCRIPT_LICENSING_CLIENT.md)
+- [Spring Boot licensing client](docs/SPRING_BOOT_LICENSING_CLIENT.md)
+- [Django licensing client](docs/DJANGO_LICENSING_CLIENT.md)
+- [Licensing MCP server](docs/LICENSING_MCP_SERVER.md)
+- [MCP implementation phases](docs/MCP_IMPLEMENTATION_PHASES.md)
 
-composer config repositories.kernelbridge path ../kernelbridge/packages/kernelbridge/licensing-client
+## Installing the Laravel licensing client in another app
+
+The PHP licensing client is private and is not on Packagist. From the other Laravel application's root, register this repository as a local Composer path repository before requiring the package:
+
+```bash
+composer config repositories.kernelbridge path ../kernelbridge/packages/kernelbridge/licensing-client-laravel
+composer require kernelbridge/licensing-client-laravel:^1.0
+```
+
+Use an absolute path such as `C:/laragon/www/kernelbridge/packages/kernelbridge/licensing-client-laravel` if the applications are not sibling folders.
+
+
+## Client SDKs
+
+The shared licensing behavior is now defined in [Licensing client spec](docs/LICENSING_CLIENT_SPEC.md). Laravel, TypeScript, Spring Boot, and Django clients are available:
+
+- [Laravel client](packages/kernelbridge/licensing-client-laravel/README.md)
+- [TypeScript client](packages/kernelbridge/licensing-client-typescript/README.md)
+- [Spring Boot starter](packages/kernelbridge/licensing-client-spring-boot/README.md)
+- [Django client](packages/kernelbridge/licensing-client-django/README.md)
+
+
+
+
+
+
+
+
+

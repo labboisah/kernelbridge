@@ -22,4 +22,31 @@ final class PageController extends Controller
     {
         return Inertia::render('Public/Docs/Licensing');
     }
+
+    public function laravelLicensingDocs(): Response
+    {
+        return Inertia::render('Public/Docs/Licensing/Laravel');
+    }
+
+    public function typescriptLicensingDocs(): Response
+    {
+        return Inertia::render('Public/Docs/Licensing/TypeScript');
+    }
+
+    public function springBootLicensingDocs(): Response
+    {
+        return Inertia::render('Public/Docs/Licensing/SpringBoot');
+    }
+
+    public function djangoLicensingDocs(): Response
+    {
+        return Inertia::render('Public/Docs/Licensing/Django');
+    }
+
+    public function mcpLicensingDocs(): Response
+    {
+        return Inertia::render('Public/Docs/Licensing/Mcp');
+    }
 }
+
+

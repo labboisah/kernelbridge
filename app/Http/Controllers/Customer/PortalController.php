@@ -29,11 +29,11 @@ use Inertia\Response;
 
 final class PortalController extends Controller
 {
-    public function services(Request $request): Response
+    public function services(Request $request, LicenseService $licenses): Response
     {
         $ids = $this->customerIds($request);
         $services = Subscription::query()->whereIn('customer_id', $ids)
-            ->with(['customer:id,uuid,name', 'product:id,uuid,name,code,slug,logo', 'plan:id,uuid,name', 'invoice:id,uuid,invoice_number,status,total,balance,currency,due_date'])
+            ->with(['customer:id,uuid,name', 'product:id,uuid,name,code,slug,logo', 'plan:id,uuid,name', 'invoice:id,uuid,invoice_number,status,total,balance,currency,due_date', 'license'])
             ->latest()->get();
 
         return Inertia::render('Customer/Services/Index', ['services' => $services->map(fn (Subscription $item) => [
@@ -42,6 +42,7 @@ final class PortalController extends Controller
             'plan' => $item->plan?->name, 'price' => $item->price, 'currency' => $item->currency,
             'billing_cycle' => $item->billing_cycle->value, 'starts_at' => $item->starts_at?->toDateString(),
             'ends_at' => $item->ends_at?->toDateString(), 'auto_renew' => $item->auto_renew,
+            'client_setup' => $this->clientSetupData($item, $licenses),
             'invoice' => $item->invoice ? ['uuid' => $item->invoice->uuid, 'number' => $item->invoice->invoice_number, 'status' => $item->invoice->status->value, 'total' => $item->invoice->total, 'balance' => $item->invoice->balance, 'currency' => $item->invoice->currency, 'due_date' => $item->invoice->due_date->toDateString()] : null,
         ])]);
     }
@@ -219,6 +220,43 @@ final class PortalController extends Controller
     }
 
     /** @return array<string, mixed> */
+    private function clientSetupData(Subscription $subscription, LicenseService $licenses): array
+    {
+        $apiUrl = rtrim((string) config('app.url'), '/').'/api/v1';
+        $productCode = $subscription->product?->code;
+        $license = $subscription->license;
+        $licenseKey = $license ? $licenses->key($license) : null;
+        $env = implode("\n", [
+            'KERNELBRIDGE_API_URL='.$apiUrl,
+            'KERNELBRIDGE_PRODUCT_CODE='.($productCode ?: 'replace-with-product-code'),
+            'KERNELBRIDGE_API_TOKEN=replace-with-product-machine-token',
+            'KERNELBRIDGE_VERIFICATION_INTERVAL=15',
+            'KERNELBRIDGE_OFFLINE_GRACE_HOURS=72',
+            'KERNELBRIDGE_CACHE_SIGNING_KEY=replace-with-independent-long-random-secret',
+            'KERNELBRIDGE_PROTECT_WEB_ROUTES=true',
+            'KERNELBRIDGE_PROTECT_EXCEPT=login,register,password/*',
+            'KERNELBRIDGE_RENEWAL_NOTICE_ENABLED=true',
+        ]);
+
+        return [
+            'api_url' => $apiUrl,
+            'product_code' => $productCode,
+            'license_key' => $licenseKey,
+            'has_license' => (bool) $licenseKey,
+            'env' => $env,
+            'composer_commands' => implode("\n", [
+                'composer config repositories.kernelbridge path ../kernelbridge/packages/kernelbridge/licensing-client-laravel',
+                'composer require kernelbridge/licensing-client-laravel:^1.0',
+                'php artisan vendor:publish --tag=kernelbridge-licensing-config',
+                'php artisan vendor:publish --tag=kernelbridge-licensing-migrations',
+                'php artisan vendor:publish --tag=kernelbridge-licensing-assets',
+                'php artisan migrate',
+            ]),
+            'route_middleware' => "Route::middleware(['auth', 'kernelbridge.subscription.active'])->group(function (): void {\n    Route::get('/dashboard', DashboardController::class)->name('dashboard');\n});",
+        ];
+    }
+
+    /** @return array<string, mixed> */
     private function planData(Plan $plan): array
     {
         return ['uuid' => $plan->uuid, 'name' => $plan->name, 'product_uuid' => $plan->product?->uuid, 'product' => $plan->product?->name, 'product_code' => $plan->product?->code,
@@ -237,3 +275,5 @@ final class PortalController extends Controller
             'auto_renew' => $item->auto_renew];
     }
 }
+
+

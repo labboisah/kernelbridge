@@ -29,7 +29,7 @@
             "App\\": "app/",
             "Database\\Factories\\": "database/factories/",
             "Database\\Seeders\\": "database/seeders/",
-            "KernelBridge\\LicensingClient\\": "packages/kernelbridge/licensing-client/src/"
+            "KernelBridge\\LicensingClient\\": "packages/kernelbridge/licensing-client-laravel/src/"
         }
     },
     "autoload-dev": {
@@ -80,7 +80,9 @@
     "repositories": {
         "kernelbridge": {
             "type": "path",
-            "url": "../kernelbridge/packages/kernelbridge/licensing-client"
+            "url": "../kernelbridge/packages/kernelbridge/licensing-client-laravel"
         }
     }
 }
+
+

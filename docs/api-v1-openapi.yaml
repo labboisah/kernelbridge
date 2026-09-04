@@ -84,3 +84,69 @@ paths:
     post:
       summary: Acknowledge local execution of the current reset instruction
       responses: { '200': { description: Reset acknowledged }, '422': { description: Stale instruction version } }
+  /mcp/customers/search:
+    get:
+      summary: MCP customer lookup scoped to the authenticated product
+      parameters:
+        - { name: query, in: query, required: false, schema: { type: string } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 50 } }
+      responses: { '200': { description: Matching customers }, '403': { description: Missing mcp:read scope }, '429': { description: Per-tool rate limited } }
+  /mcp/customers/{customer_uuid}/services:
+    get:
+      summary: MCP list customer services for the authenticated product
+      parameters:
+        - { name: customer_uuid, in: path, required: true, schema: { type: string, format: uuid } }
+      responses: { '200': { description: Customer services }, '403': { description: Missing mcp:read scope }, '404': { description: Customer not found } }
+  /mcp/services/{subscription_uuid}/setup:
+    get:
+      summary: MCP retrieve install-safe service setup values
+      parameters:
+        - { name: subscription_uuid, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: runtime, in: query, required: true, schema: { type: string, enum: [laravel, typescript, spring-boot, django] } }
+      responses: { '200': { description: Setup values with placeholder machine token }, '403': { description: Missing mcp:read scope } }
+  /mcp/licenses/explain-activation-issue:
+    get:
+      summary: MCP explain activation or license status issues
+      parameters:
+        - { name: license_uuid, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: activation_uuid, in: query, required: false, schema: { type: string, format: uuid } }
+      responses: { '200': { description: Activation issue explanation }, '422': { description: license_uuid or activation_uuid required } }
+  /mcp/licenses/{license_uuid}/activations:
+    get:
+      summary: MCP list activations for one license
+      parameters:
+        - { name: license_uuid, in: path, required: true, schema: { type: string, format: uuid } }
+      responses: { '200': { description: License activations }, '404': { description: License not found } }
+  /mcp/licenses/issue:
+    post:
+      summary: MCP issue a license with human confirmation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subscription_uuid, confirmed_by, confirmation_note]
+              properties:
+                subscription_uuid: { type: string, format: uuid }
+                max_activations: { type: integer, minimum: 1, maximum: 100 }
+                confirmed_by: { type: string, maxLength: 255 }
+                confirmation_note: { type: string, maxLength: 1000 }
+      responses: { '201': { description: License issued }, '200': { description: Existing active license returned }, '403': { description: Missing mcp:write scope }, '422': { description: Confirmation or subscription validation failed }, '429': { description: Per-tool rate limited } }
+  /mcp/license-activations/{activation_uuid}/deactivate:
+    post:
+      summary: MCP deactivate one activation with human confirmation
+      parameters:
+        - { name: activation_uuid, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirmed_by, confirmation_note]
+              properties:
+                reason: { type: string, maxLength: 255 }
+                confirmed_by: { type: string, maxLength: 255 }
+                confirmation_note: { type: string, maxLength: 1000 }
+      responses: { '200': { description: Activation deactivated }, '403': { description: Missing mcp:write scope }, '422': { description: Confirmation or activation validation failed }, '429': { description: Per-tool rate limited } }

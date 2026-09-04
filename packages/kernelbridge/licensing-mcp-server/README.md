@@ -18,12 +18,42 @@ npm run build
 
 ## Configuration
 
+The MCP server reads configuration from process environment variables. It does not automatically load a `.env` file. Put these values in your MCP client config under `env`, export them in the shell before starting the server, or inject them from your process manager/CI secret store.
+
+Example env files are included in `deployment/env`:
+
+- `local.env.example`
+- `internal-server.env.example`
+- `managed-support.env.example`
+
 ```env
 KERNELBRIDGE_API_URL=https://kernelbridge.com/api/v1
 KERNELBRIDGE_API_TOKEN=replace-with-admin-or-support-scoped-token
 KERNELBRIDGE_PRODUCT_CODE=ALIGNEX
 KERNELBRIDGE_DOCS_ROOT=C:/laragon/www/kernelbridge
 KERNELBRIDGE_MCP_ALLOW_MUTATIONS=false
+```
+
+PowerShell local run:
+
+```powershell
+$env:KERNELBRIDGE_API_URL="https://kernelbridge.com/api/v1"
+$env:KERNELBRIDGE_API_TOKEN="replace-with-mcp-token"
+$env:KERNELBRIDGE_PRODUCT_CODE="ALIGNEX"
+$env:KERNELBRIDGE_DOCS_ROOT="C:/laragon/www/kernelbridge"
+$env:KERNELBRIDGE_MCP_ALLOW_MUTATIONS="false"
+kernelbridge-licensing-mcp
+```
+
+Bash local run:
+
+```bash
+export KERNELBRIDGE_API_URL="https://kernelbridge.com/api/v1"
+export KERNELBRIDGE_API_TOKEN="replace-with-mcp-token"
+export KERNELBRIDGE_PRODUCT_CODE="ALIGNEX"
+export KERNELBRIDGE_DOCS_ROOT="/srv/kernelbridge/docs"
+export KERNELBRIDGE_MCP_ALLOW_MUTATIONS="false"
+kernelbridge-licensing-mcp
 ```
 
 Mutation tools are disabled unless `KERNELBRIDGE_MCP_ALLOW_MUTATIONS=true`. Keep production tokens scoped to the smallest support/admin role that can perform the needed operation.
@@ -123,3 +153,4 @@ npm run typecheck
 npm test
 npm run build
 ```
+

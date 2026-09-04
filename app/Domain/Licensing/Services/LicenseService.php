@@ -38,6 +38,20 @@ final class LicenseService
         return is_string($encrypted) && $encrypted !== '' ? Crypt::decryptString($encrypted) : null;
     }
 
+    public function cacheSigningKey(SoftwareLicense $license): string
+    {
+        $encrypted = data_get($license->metadata, 'encrypted_cache_signing_key');
+        if (is_string($encrypted) && $encrypted !== '') {
+            return Crypt::decryptString($encrypted);
+        }
+
+        $key = Str::random(64);
+        $metadata = $license->metadata ?? [];
+        $metadata['encrypted_cache_signing_key'] = Crypt::encryptString($key);
+        $license->forceFill(['metadata' => $metadata])->save();
+
+        return $key;
+    }
     public function activate(ApiClient $client, array $data, string $ip): array
     {
         $license = $this->resolve($client, $data['license_key']);
@@ -103,3 +117,4 @@ final class LicenseService
         return hash_hmac('sha256', $device, (string) config('app.key'));
     }
 }
+

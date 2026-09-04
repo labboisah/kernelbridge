@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "kernelbridge-licensing-django"
+version = "1.0.0"
+description = "Django client for KernelBridge license activation, verification, entitlement guards, and route protection."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "LicenseRef-Proprietary"
+authors = [{ name = "KernelBridge Technologies LTD" }]
+dependencies = [
+  "Django>=4.2",
+  "requests>=2.31",
+  "cryptography>=42.0"
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "pytest-django>=4.8"
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["kernelbridge_licensing"]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "tests.settings"
+pythonpath = ["."]
+testpaths = ["tests"]
+

@@ -7,6 +7,7 @@ use App\Http\Controllers\Admin\DashboardController as AdminDashboardController;
 use App\Http\Controllers\Admin\DemoModeController as AdminDemoModeController;
 use App\Http\Controllers\Admin\InvoiceController as AdminInvoiceController;
 use App\Http\Controllers\Admin\LeadController as AdminLeadController;
+use App\Http\Controllers\Admin\McpController as AdminMcpController;
 use App\Http\Controllers\Admin\PaymentController as AdminPaymentController;
 use App\Http\Controllers\Admin\PlanController as AdminPlanController;
 use App\Http\Controllers\Admin\ProductController as AdminProductController;
@@ -40,6 +41,11 @@ Route::get('/products/{product:slug}', [ProductController::class, 'show'])->name
 Route::get('/services', [PageController::class, 'services'])->name('services');
 Route::get('/about', [PageController::class, 'about'])->name('about');
 Route::get('/docs/licensing', [PageController::class, 'licensingDocs'])->name('docs.licensing');
+Route::get('/docs/licensing/laravel', [PageController::class, 'laravelLicensingDocs'])->name('docs.licensing.laravel');
+Route::get('/docs/licensing/typescript', [PageController::class, 'typescriptLicensingDocs'])->name('docs.licensing.typescript');
+Route::get('/docs/licensing/spring-boot', [PageController::class, 'springBootLicensingDocs'])->name('docs.licensing.spring-boot');
+Route::get('/docs/licensing/django', [PageController::class, 'djangoLicensingDocs'])->name('docs.licensing.django');
+Route::get('/docs/licensing/mcp', [PageController::class, 'mcpLicensingDocs'])->name('docs.licensing.mcp');
 Route::get('/contact', [ContactController::class, 'create'])->name('contact');
 Route::post('/contact', [ContactController::class, 'store'])->middleware('throttle:5,1')->name('contact.store');
 Route::get('/demo', [DemoController::class, 'create'])->name('demo');
@@ -93,6 +99,10 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
         Route::post('/support/{ticket:uuid}/messages', [AdminSupportTicketController::class, 'message'])->name('support.messages.store');
         Route::get('/demo-mode', [AdminDemoModeController::class, 'index'])->name('demo-mode.index');
         Route::put('/demo-mode/{profile:uuid}', [AdminDemoModeController::class, 'update'])->name('demo-mode.update');
+        Route::get('/mcp', [AdminMcpController::class, 'index'])->middleware('role:super_admin|admin')->name('mcp.index');
+        Route::post('/mcp/clients', [AdminMcpController::class, 'storeClient'])->middleware('role:super_admin|admin')->name('mcp.clients.store');
+        Route::post('/mcp/credentials/{credential:uuid}/rotate', [AdminMcpController::class, 'rotateCredential'])->middleware('role:super_admin|admin')->name('mcp.credentials.rotate');
+        Route::post('/mcp/credentials/{credential:uuid}/revoke', [AdminMcpController::class, 'revokeCredential'])->middleware('role:super_admin|admin')->name('mcp.credentials.revoke');
         Route::post('/payments/{payment:uuid}/verify', [AdminPaymentController::class, 'verify'])->name('payments.verify');
         Route::post('/payments/{payment:uuid}/reject', [AdminPaymentController::class, 'reject'])->name('payments.reject');
         Route::post('/payments/{payment:uuid}/refund', [AdminPaymentController::class, 'refund'])->name('payments.refund');
@@ -130,3 +140,8 @@ Route::middleware('auth')->group(function () {
 });
 
 require __DIR__.'/auth.php';
+
+
+
+
+

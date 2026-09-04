@@ -15,7 +15,7 @@ final class ApiCredentialService
 
     public function createClient(Product $product, string $name, array $options = []): ApiClient
     {
-        return ApiClient::query()->updateOrCreate(['product_id' => $product->id], ['name' => $name, 'is_active' => $options['is_active'] ?? true, 'rate_limit_per_minute' => $options['rate_limit_per_minute'] ?? 120, 'allowed_ips' => $options['allowed_ips'] ?? null, 'scopes' => $options['scopes'] ?? ['*']]);
+        return ApiClient::query()->updateOrCreate(['product_id' => $product->id, 'name' => $name], ['is_active' => $options['is_active'] ?? true, 'rate_limit_per_minute' => $options['rate_limit_per_minute'] ?? 120, 'allowed_ips' => $options['allowed_ips'] ?? null, 'scopes' => $options['scopes'] ?? ['*']]);
     }
 
     public function issue(ApiClient $client, string $name, ?User $actor = null, ?\DateTimeInterface $expiresAt = null): array
@@ -47,3 +47,5 @@ final class ApiCredentialService
         return hash_hmac('sha256', $secret, (string) config('app.key'));
     }
 }
+
+

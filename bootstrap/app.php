@@ -5,6 +5,7 @@ use App\Http\Middleware\AddSecurityHeaders;
 use App\Http\Middleware\AssignApiRequestId;
 use App\Http\Middleware\AuthenticateApiClient;
 use App\Http\Middleware\HandleInertiaRequests;
+use App\Http\Middleware\EnsureApiClientScope;
 use App\Http\Middleware\LimitApiClientRequests;
 use App\Http\Middleware\LogApiRequest;
 use App\Support\ApiResponse;
@@ -36,6 +37,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'role_or_permission' => RoleOrPermissionMiddleware::class,
             'api.request_id' => AssignApiRequestId::class,
             'api.security' => AddApiSecurityHeaders::class,
+            'api.scope' => EnsureApiClientScope::class,
             'api.client' => AuthenticateApiClient::class,
             'api.rate_limit' => LimitApiClientRequests::class,
             'api.log' => LogApiRequest::class,
@@ -68,3 +70,4 @@ return Application::configure(basePath: dirname(__DIR__))
             return ApiResponse::error($request, 'server_error', 'An unexpected error occurred.', 500);
         });
     })->create();
+

@@ -2,12 +2,15 @@
 
 namespace Tests\Feature;
 
+use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Factory;
 use Illuminate\Http\Client\Request;
 use Illuminate\Http\Request as ServerRequest;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
 use KernelBridge\LicensingClient\Exceptions\KernelBridgeApiException;
 use KernelBridge\LicensingClient\Exceptions\KernelBridgeUnavailableException;
@@ -49,7 +52,7 @@ final class LicensingClientTest extends TestCase
         ]);
 
         if (! Schema::hasTable('kernelbridge_license_states')) {
-            $migration = require base_path('packages/kernelbridge/licensing-client/database/migrations/2026_01_01_000000_create_kernelbridge_license_states_table.php');
+            $migration = require base_path('packages/kernelbridge/licensing-client-laravel/database/migrations/2026_01_01_000000_create_kernelbridge_license_states_table.php');
             $migration->up();
         }
 
@@ -57,6 +60,9 @@ final class LicensingClientTest extends TestCase
         $this->cache = new LicenseCacheService;
         $this->activation = new LicenseActivationService($client, $this->cache);
         $this->verification = new LicenseVerificationService($client, $this->cache);
+
+        Route::middleware('kernelbridge.subscription.active')->get('/protected-by-license', fn (): string => 'licensed');
+        Route::middleware('web')->get('/client-dashboard', fn (): string => 'client app dashboard');
     }
 
     public function test_activation_persists_encrypted_signed_state_and_uses_machine_credentials(): void
@@ -151,7 +157,107 @@ final class LicensingClientTest extends TestCase
         $this->assertFalse($this->cache->hasFeature('finance'));
     }
 
-    private function fakeSuccessfulApi(): void
+    public function test_package_routes_render_activation_ui_and_activate_license(): void
+    {
+        $this->get('/license')
+            ->assertOk()
+            ->assertSee('License status')
+            ->assertSee('KernelBridge Technologies')
+            ->assertSee('ALIGNEX');
+
+        $this->fakeSuccessfulApi();
+
+        $this->post('/license', [
+            'license_key' => 'KBT-LIC-SECRET',
+            'device_name' => 'AlignEx production',
+        ])->assertRedirect('/');
+
+        $this->assertTrue($this->cache->hasUsableLicense());
+    }
+
+    public function test_unlicensed_web_requests_redirect_to_activation_ui_but_json_requests_return_402(): void
+    {
+        $this->get('/protected-by-license')
+            ->assertRedirect(route('kernelbridge.license.show'));
+
+        $this->getJson('/protected-by-license')
+            ->assertStatus(402)
+            ->assertSee('Activate this application before continuing.', false);
+    }
+
+    public function test_global_web_protection_blocks_client_app_pages_until_activation(): void
+    {
+        $this->app->make(HttpKernel::class)->pushMiddleware(LicenseMiddleware::class);
+
+        $this->get('/client-dashboard')
+            ->assertRedirect(route('kernelbridge.license.show'));
+
+        $this->fakeSuccessfulApi();
+        $this->post('/license', [
+            'license_key' => 'KBT-LIC-SECRET',
+            'device_name' => 'Client app production',
+        ])->assertRedirect('/');
+
+        $this->get('/client-dashboard')
+            ->assertOk()
+            ->assertSee('client app dashboard');
+    }
+
+    public function test_sensitive_configuration_changes_require_reactivation(): void
+    {
+        $this->fakeSuccessfulApi();
+        $this->activation->activate('KBT-LIC-SECRET');
+
+        $this->assertTrue($this->cache->hasUsableLicense());
+
+        config()->set('kernelbridge-licensing.api_token', 'tampered-machine-token');
+
+        $this->assertFalse($this->cache->hasUsableLicense());
+        $this->assertSame('configuration_tampered', $this->cache->activationRequirementReason());
+        $this->assertSame('KernelBridge licensing configuration changed. Re-activation is required.', $this->cache->activationRequirementMessage());
+    }
+
+    public function test_renewal_notice_levels_warn_at_three_two_and_one_months(): void
+    {
+        $this->fakeSuccessfulApi(now()->addMonthsNoOverflow(3)->subDay());
+        $this->activation->activate('KBT-LIC-SECRET');
+        $this->assertSame('3_months', $this->cache->renewalNoticeLevel());
+        $this->assertStringContainsString('about 3 months', $this->cache->renewalNoticeMessage());
+
+        LicenseState::query()->update(['expires_at' => now()->addMonthsNoOverflow(2)->subDay(), 'offline_grace_expires_at' => now()->addMonthsNoOverflow(2)->subDay()]);
+        $this->assertSame('2_months', $this->cache->renewalNoticeLevel());
+
+        LicenseState::query()->update(['expires_at' => now()->addMonthNoOverflow()->subDay(), 'offline_grace_expires_at' => now()->addMonthNoOverflow()->subDay()]);
+        $this->assertSame('1_month', $this->cache->renewalNoticeLevel());
+
+        $this->get('/protected-by-license')
+            ->assertOk()
+            ->assertHeader('X-KernelBridge-Renewal-Notice-Level', '1_month')
+            ->assertHeader('X-KernelBridge-Renewal-Expires-At');
+    }
+
+    public function test_activation_limit_errors_use_a_device_limit_message(): void
+    {
+        Http::swap(new Factory);
+        Http::fake([
+            '*/licenses/activate' => Http::response([
+                'success' => false,
+                'error' => [
+                    'code' => 'activation_limit_reached',
+                    'message' => 'Activation limit reached.',
+                ],
+            ], 422),
+        ]);
+
+        $this->post('/license', [
+            'license_key' => 'KBT-LIC-SECRET',
+            'device_name' => 'Second device',
+        ])
+            ->assertSessionHasErrors('license_key')
+            ->assertRedirect();
+    }
+
+    private function fakeSuccessfulApi(?Carbon $expiresAt = null): void
     {
         Http::swap(new Factory);
         $license = [
@@ -159,13 +265,13 @@ final class LicensingClientTest extends TestCase
             'activation_uuid' => 'act-00000000-0000-4000-8000-000000000001',
             'subscription_uuid' => 'sub-00000000-0000-4000-8000-000000000001',
             'status' => 'active',
-            'expires_at' => now()->addYear()->toISOString(),
+            'expires_at' => ($expiresAt ?? now()->addYear())->toISOString(),
         ];
         Http::fake([
             '*/licenses/activate' => Http::response(['success' => true, 'data' => $license], 201),
             '*/licenses/verify' => Http::response(['success' => true, 'data' => $license]),
             '*/licenses/deactivate' => Http::response(['success' => true, 'data' => ['status' => 'deactivated']]),
-            '*/subscriptions/status*' => Http::response(['success' => true, 'data' => ['status' => 'active', 'ends_at' => now()->addYear()->toISOString()]]),
+            '*/subscriptions/status*' => Http::response(['success' => true, 'data' => ['status' => 'active', 'ends_at' => ($expiresAt ?? now()->addYear())->toISOString()]]),
             '*/entitlements*' => Http::response(['success' => true, 'data' => ['entitlements' => [
                 ['key' => 'finance', 'enabled' => true, 'limit' => null],
                 ['key' => 'inventory', 'enabled' => false, 'limit' => null],
@@ -174,3 +280,5 @@ final class LicensingClientTest extends TestCase
         ]);
     }
 }
+
+

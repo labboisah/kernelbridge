@@ -122,7 +122,7 @@ Start with one worker per product and adjust `numprocs`, PHP-FPM children and My
 
 ## Licensing API integration
 
-Products communicate only through HTTPS with `https://kernelbridge.com/api/v1`; they never query `kernelbridge_db`. Laravel products should install the reusable client documented in `docs/LICENSING_CLIENT.md`. From the commercial platform, issue independent credentials:
+Products communicate only through HTTPS with `https://kernelbridge.com/api/v1`; they never query `kernelbridge_db`. Product applications should implement the shared client behavior in `docs/LICENSING_CLIENT_SPEC.md`. Laravel products should install the reusable client documented in `docs/LICENSING_CLIENT.md`; Electron or trusted Node products should use `docs/TYPESCRIPT_LICENSING_CLIENT.md`; Spring Boot products should use `docs/SPRING_BOOT_LICENSING_CLIENT.md`; Django products should use `docs/DJANGO_LICENSING_CLIENT.md`. From the commercial platform, issue independent credentials:
 
 ```bash
 cd /var/www/kernelbridge/current
@@ -165,3 +165,10 @@ Before each deployment verify backups and rollback release. Afterward check the 
 ## Capacity and migration triggers
 
 One VPS is a cost optimization, not high availability. Monitor memory, swap, CPU steal, MySQL connections/slow queries, Redis memory/evictions, PHP-FPM saturation, queue age, disk/inodes and backup duration. Move a product to its own host when it creates noisy-neighbour contention, needs independent compliance boundaries, requires separate scaling or exhausts safe VPS headroom. DNS, individual certificates, isolated roots/databases and independent credentials make that migration straightforward.
+
+
+
+
+
+
+

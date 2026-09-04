@@ -17,6 +17,7 @@ defineProps({
         <template v-else-if="name === 'support'"><path d="M4 14a8 8 0 0 1 16 0"/><path d="M18 19c0 1.7-1.3 3-3 3h-3"/><rect x="2" y="13" width="4" height="6" rx="2"/><rect x="18" y="13" width="4" height="6" rx="2"/></template>
         <template v-else-if="name === 'support-teams'"><circle cx="8" cy="8" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M2 21a6 6 0 0 1 12 0M13 17a5 5 0 0 1 9 3"/></template>
         <template v-else-if="name === 'demo-mode'"><path d="M8 3h8l1 4H7z"/><rect x="4" y="7" width="16" height="14" rx="2"/><path d="m10 12 5 3-5 3z"/></template>
+        <template v-else-if="name === 'mcp'"><path d="M12 3v4"/><path d="M12 17v4"/><path d="M3 12h4"/><path d="M17 12h4"/><rect x="7" y="7" width="10" height="10" rx="2"/><path d="M9 10h6M9 14h6"/></template>
         <template v-else-if="name === 'products'"><path d="m12 2 9 5-9 5-9-5z"/><path d="m3 12 9 5 9-5M3 17l9 5 9-5"/></template>
         <template v-else-if="name === 'plans'"><path d="M4 5h16M4 12h16M4 19h16"/><circle cx="8" cy="5" r="2" fill="currentColor" stroke="none"/><circle cx="16" cy="12" r="2" fill="currentColor" stroke="none"/><circle cx="10" cy="19" r="2" fill="currentColor" stroke="none"/></template>
         <template v-else-if="name === 'services'"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 4V2M16 4V2M8 10h8M8 14h5"/></template>
@@ -25,3 +26,4 @@ defineProps({
         <template v-else><circle cx="12" cy="12" r="9"/><path d="M9 12h6"/></template>
     </svg>
 </template>
+

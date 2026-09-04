@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\V1\DemoModeController;
 use App\Http\Controllers\Api\V1\HealthController;
+use App\Http\Controllers\Api\V1\McpController;
 use App\Http\Controllers\Api\V1\ProductIntegrationController;
 use App\Http\Resources\Api\V1\UserResource;
 use Illuminate\Http\Request;
@@ -22,4 +23,18 @@ Route::middleware(['api.request_id', 'api.security', 'api.log', 'api.client', 'a
     Route::post('/demo/sessions/{session:uuid}/end', [DemoModeController::class, 'end'])->name('demo.sessions.end');
     Route::post('/demo/events', [DemoModeController::class, 'event'])->name('demo.events.store');
     Route::post('/demo/resets/acknowledge', [DemoModeController::class, 'acknowledgeReset'])->name('demo.resets.acknowledge');
+    Route::prefix('mcp')->name('mcp.')->group(function (): void {
+        Route::middleware('api.scope:mcp:read')->group(function (): void {
+            Route::get('/customers/search', [McpController::class, 'customers'])->name('customers.search');
+            Route::get('/customers/{customer}/services', [McpController::class, 'customerServices'])->name('customers.services');
+            Route::get('/services/{subscription}/setup', [McpController::class, 'serviceSetup'])->name('services.setup');
+            Route::get('/licenses/explain-activation-issue', [McpController::class, 'explainActivationIssue'])->name('licenses.explain-activation-issue');
+            Route::get('/licenses/{license}/activations', [McpController::class, 'activations'])->name('licenses.activations');
+        });
+        Route::middleware('api.scope:mcp:write')->group(function (): void {
+            Route::post('/licenses/issue', [McpController::class, 'issueLicense'])->name('licenses.issue');
+            Route::post('/license-activations/{activation}/deactivate', [McpController::class, 'deactivateActivation'])->name('license-activations.deactivate');
+        });
+    });
 });
+
