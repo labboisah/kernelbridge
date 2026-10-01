@@ -1,0 +1,11 @@
+<script setup>
+import { Head, Link, router } from '@inertiajs/vue3';
+import { ref } from 'vue';
+defineProps({ title: String });
+const open = ref(false);
+const links = [['partner.customers','Clients / customers'],['partner.support','Support requests'],['partner.revenue','Revenue & commissions'],['partner.invoices','Invoices'],['partner.payments','Payments']];
+</script>
+<template><Head :title="title + ' | Partner portal'"/><div class="min-h-screen bg-slate-100 text-slate-900">
+<header class="bg-[#061a35] text-white"><div class="page-shell flex items-center justify-between gap-4 py-5"><Link :href="route('partner.dashboard')" class="text-xl font-bold">KernelBridge <span class="text-cyan-300">Partners</span></Link><div class="flex items-center gap-4"><button type="button" class="lg:hidden" @click="open=!open" :aria-expanded="open" aria-controls="partner-nav">Menu</button><button @click="router.post(route('logout'))">Sign out</button></div></div></header>
+<div class="page-shell grid gap-6 py-8 lg:grid-cols-[240px_minmax(0,1fr)]"><aside id="partner-nav" class="rounded-2xl bg-white p-4 lg:block" :class="open?'block':'hidden'"><p class="mb-4 break-words text-sm text-slate-500">{{ $page.props.auth.user.name }}</p><nav aria-label="Partner navigation"><Link :href="route('partner.dashboard')" class="mb-2 block rounded-lg p-3 font-bold" :class="route().current('partner.dashboard')?'bg-cyan-50 text-cyan-800':''">Overview</Link><template v-if="$page.props.auth.approved_agent"><Link v-for="[name,label] in links" :key="name" :href="route(name)" class="mb-2 block rounded-lg p-3" :class="route().current(name+'*')?'bg-cyan-50 font-bold text-cyan-800':'hover:bg-slate-50'">{{ label }}</Link></template><Link :href="route('partners.index')" class="block p-3">Partner programmes</Link><Link :href="route('profile.edit')" class="block p-3">Login & profile</Link><Link :href="route('home')" class="block p-3">Public website</Link></nav></aside>
+<main class="min-w-0"><h1 class="mb-6 text-3xl font-bold">{{ title }}</h1><p v-if="$page.props.flash.success" role="status" class="success-message mb-5">{{ $page.props.flash.success }}</p><p v-if="$page.props.flash.error" role="alert" class="mb-5 rounded-lg bg-red-50 p-4 text-red-800">{{ $page.props.flash.error }}</p><slot/></main></div></div></template>

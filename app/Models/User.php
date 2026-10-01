@@ -65,6 +65,17 @@ class User extends Authenticatable
         ];
     }
 
+    public function isPartner(): bool
+    {
+        return PartnerApplication::where('user_id', $this->id)->whereIn('type', array_keys(config('partners')))->exists();
+    }
+
+    public function isApprovedAgent(): bool
+    {
+        return $this->hasRole(\App\Enums\UserRole::Agent->value)
+            && PartnerApplication::where('user_id', $this->id)->where('type', 'sales_agent')->where('status', 'approved')->exists();
+    }
+
     public function customers(): BelongsToMany
     {
         return $this->belongsToMany(Customer::class)->withPivot('is_primary')->withTimestamps();

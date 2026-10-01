@@ -10,6 +10,19 @@ enum UserRole: string
     case Finance = 'finance';
     case Support = 'support';
     case Customer = 'customer';
+    case Partner = 'partner';
+    case Investor = 'investor';
+    case Agent = 'agent';
+    case Developer = 'developer';
+
+    public static function forPartnerType(string $type): string
+    {
+        return match ($type) {
+            'sales_agent' => self::Agent->value,
+            'developer' => self::Developer->value,
+            'investor' => self::Investor->value,
+        };
+    }
 
     /** @return list<string> */
     public static function names(): array

@@ -8,7 +8,7 @@ defineEmits(['toggle']);
             <input type="checkbox" :checked="checked" :disabled="disabled" class="mt-1 rounded text-cyan-700" @change="$emit('toggle', item.uuid)" />
             <span><strong>{{ item.name }}</strong><span class="mt-1 block text-sm">{{ Number(item.price) > 0 ? new Intl.NumberFormat('en-NG', { style: 'currency', currency: item.currency }).format(Number(item.price)) + ' / ' + item.billing_cycle : 'Contact sales' }}</span></span>
         </label>
-        <p class="mt-3 text-sm text-slate-600">{{ item.description }}</p>
+        <p v-if="disabled && Number(item.price) <= 0" class="mt-2 text-xs font-semibold text-amber-800">Unavailable until an administrator sets the package price.</p><p class="mt-3 text-sm text-slate-600">{{ item.description }}</p>
         <p v-if="Number(item.setup_fee) > 0" class="mt-2 text-xs text-slate-600">One-time setup: {{ item.currency }} {{ item.setup_fee }}</p>
         <details class="mt-3">
             <summary class="cursor-pointer text-sm font-semibold text-cyan-800">Included features ({{ (item.features || item.modules).length }})</summary>

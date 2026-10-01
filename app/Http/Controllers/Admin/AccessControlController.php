@@ -20,7 +20,7 @@ final class AccessControlController extends Controller
     {
         abort_unless($request->user()->can('access.manage'), 403);
         $permissions = Permission::query()->where('guard_name', 'web')->orderBy('name')->get();
-        $roles = Role::query()->whereIn('name', UserRole::administrative())->with('permissions:id,name')->orderBy('name')->get();
+        $roles = Role::query()->whereIn('name', UserRole::names())->with('permissions:id,name')->orderBy('name')->get();
 
         return Inertia::render('Admin/AccessControl/Index', [
             'roles' => $roles->map(fn (Role $role): array => ['id' => $role->id, 'name' => $role->name, 'permissions' => $role->permissions->pluck('name')->values()]),
@@ -32,7 +32,7 @@ final class AccessControlController extends Controller
     public function update(Request $request, Role $role, AuditRecorder $audit): RedirectResponse
     {
         abort_unless($request->user()->can('access.manage'), 403);
-        abort_unless(in_array($role->name, UserRole::administrative(), true), 404);
+        abort_unless(in_array($role->name, UserRole::names(), true), 404);
         abort_if($role->name === UserRole::SuperAdmin->value && ! $request->user()->hasRole(UserRole::SuperAdmin->value), 403);
         $data = $request->validate(['permissions' => ['present', 'array'], 'permissions.*' => ['string', Rule::exists('permissions', 'name')->where('guard_name', 'web')]]);
         $before = $role->permissions()->pluck('name')->sort()->values()->all();

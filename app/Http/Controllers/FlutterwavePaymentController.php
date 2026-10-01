@@ -25,17 +25,17 @@ final class FlutterwavePaymentController extends Controller
     {
         $data = $request->validate(['status' => ['required', 'string'], 'tx_ref' => ['required', 'string', 'max:255'], 'transaction_id' => ['required', 'string', 'max:255']]);
         if ($data['status'] !== 'successful') {
-            return redirect()->route('portal.invoices.index')->with('error', 'The online payment was not completed.');
+            return redirect()->route($request->user()?->isApprovedAgent() ? 'partner.invoices' : 'portal.invoices.index')->with('error', 'The online payment was not completed.');
         }
         try {
             $invoice = $service->verifyAndComplete($data['transaction_id'], $data['tx_ref']);
         } catch (Throwable $exception) {
             report($exception);
 
-            return redirect()->route('portal.invoices.index')->with('error', 'Payment verification is pending. Please check again shortly or contact support.');
+            return redirect()->route($request->user()?->isApprovedAgent() ? 'partner.invoices' : 'portal.invoices.index')->with('error', 'Payment verification is pending. Please check again shortly or contact support.');
         }
 
-        return redirect()->route('portal.invoices.show', $invoice)->with('success', 'Payment verified. Your service is now active.');
+        return redirect()->route($request->user()?->isApprovedAgent() && \App\Models\Customer::whereKey($invoice->customer_id)->where('partner_user_id', $request->user()->id)->exists() ? 'partner.invoices.show' : 'portal.invoices.show', $invoice->uuid)->with('success', 'Payment verified. Your service is now active.');
     }
 
     public function webhook(Request $request, FlutterwavePaymentService $service): JsonResponse

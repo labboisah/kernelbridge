@@ -36,7 +36,10 @@ class AuthenticatedSessionController extends Controller
 
         $destination = $request->user()->hasAnyRole([UserRole::Sales->value, UserRole::Finance->value, UserRole::Support->value]) ? 'staff.dashboard' : ($request->user()->hasAnyRole([UserRole::SuperAdmin->value, UserRole::Admin->value]) ? 'admin.dashboard' : 'dashboard');
 
-        return redirect()->route($destination);
+        if ($destination === 'dashboard' && $request->user()->isPartner()) {
+            $destination = 'partner.dashboard';
+        }
+        return redirect()->intended(route($destination));
     }
 
     /**

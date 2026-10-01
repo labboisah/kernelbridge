@@ -56,6 +56,7 @@ final class PackageChangeService
                 throw ValidationException::withMessages(['packages' => 'New packages need a price and the same currency and billing period.']);
             }
             $rows[] = ['uuid' => $uuid, 'plan_id' => $plan->id, 'key' => $plan->slug, 'name' => $plan->name,
+                'configuration' => $old->has($uuid) && isset($old[$uuid]['configuration']) ? $old[$uuid]['configuration'] : ($old->has($uuid) ? $this->catalog->describe($plan->slug) : $this->catalog->plan($plan)),
                 'price' => (! $renew && $old->has($uuid)) ? $old[$uuid]['price'] : $plan->price, 'setup_fee' => $plan->setup_fee];
         }
         $added = array_values(array_filter($rows, fn ($row) => ! $old->has($row['uuid'])));
@@ -76,12 +77,14 @@ final class PackageChangeService
             $lines = array_merge($lines, app(ImplementationPricing::class)->lines(data_get($subscription->metadata, 'implementation', []), $subscription->product_id));
         }
 
+        $vatRate = \App\Models\BillingSetting::vatRate();
+        $totals = app(\App\Domain\Sales\Services\QuotationCalculator::class)->calculate($lines, $vatRate);
         return ['rows' => $rows, 'added' => $added, 'removed' => $removed, 'items' => $lines,
             'quoted_at' => now()->toISOString(), 'currency' => $subscription->currency,
-            'charge' => Credit::money(array_sum(array_map(fn ($line) => Credit::minor($line['unit_price']) * ($line['quantity'] ?? 1), $lines))),
+            'charge' => $totals['total'], 'subtotal' => $totals['subtotal'], 'vat' => $totals['tax'], 'vat_rate' => $vatRate,
             'credit' => Credit::money($credit), 'available_credit' => Credit::money($this->credits->balance($subscription->customer_id, $subscription->currency)),
             'period_ends_at' => $subscription->ends_at?->toISOString(),
-            'configuration' => ['packages' => array_map(fn ($row) => $this->catalog->describe($row['key']), $rows)]];
+            'configuration' => ['packages' => array_map(fn ($row) => $row['configuration'], $rows)]];
     }
 
     public function change(Subscription $subscription, array $uuids, User $actor, bool $useCredit, bool $renew = false): ?Invoice
@@ -170,6 +173,7 @@ final class PackageChangeService
         }
         $this->applyRows($subscription, $order->snapshot['rows']);
         $order->update(['status' => 'applied', 'applied_at' => now()]);
+        app(\App\Domain\Partners\CommissionService::class)->accrue($order->invoice);
         $this->audit($subscription, $order->kind === 'renewal' ? 'packages_renewed' : 'packages_added', $actor);
     }
 
@@ -199,7 +203,7 @@ final class PackageChangeService
         $metadata['package_names'] = array_column($rows, 'name');
         $metadata['package_prices'] = $rows;
         $metadata['primary_package'] = in_array($metadata['primary_package'] ?? null, $keys, true) ? $metadata['primary_package'] : ($keys[0] ?? null);
-        $metadata['licensed_modules'] = $this->catalog->modules($keys);
+        $metadata['licensed_modules'] = array_values(array_unique(array_merge([], ...array_map(fn ($row) => array_column($row['configuration']['features'], 'key'), $rows))));
         $metadata['configuration_revision'] = ($metadata['configuration_revision'] ?? 1) + 1;
         $primary = collect($rows)->firstWhere('key', $metadata['primary_package']);
         $subscription->update(['metadata' => $metadata, 'plan_id' => $primary['plan_id'] ?? $subscription->plan_id,

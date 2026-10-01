@@ -38,7 +38,8 @@ final class CheckoutController extends Controller
 
         return Inertia::render('Customer/Checkout', [
             'customer' => $request->user()->customers()->orderByDesc('customer_user.is_primary')->firstOrFail()->only(['name', 'email']),
-            'plans' => $plans->map(fn ($p) => ['uuid' => $p->uuid, 'name' => $p->name, 'description' => $p->description, 'product' => $p->product->name, 'price' => $p->price, 'setup_fee' => $p->setup_fee, 'currency' => $p->currency, 'billing_cycle' => $p->billing_cycle->value, 'features' => $p->product->code === 'MEDIFLOW' ? app(PackageCatalog::class)->describe($p->slug)['features'] : $p->features->where('enabled', true)->map(fn ($f) => ['key' => $f->feature_key, 'name' => $f->feature_name, 'description' => ''])->values()]),
+            'plans' => $plans->map(fn ($p) => ['uuid' => $p->uuid, 'name' => $p->name, 'description' => $p->description, 'product' => $p->product->name, 'price' => $p->price, 'setup_fee' => $p->setup_fee, 'currency' => $p->currency, 'billing_cycle' => $p->billing_cycle->value, 'features' => $p->product->code === 'MEDIFLOW' ? app(PackageCatalog::class)->plan($p)['features'] : $p->features->where('enabled', true)->map(fn ($f) => ['key' => $f->feature_key, 'name' => $f->feature_name, 'description' => $f->description ?? ''])->values()]),
+            'vatRate' => \App\Models\BillingSetting::vatRate(),
             'hosting' => HostingSetting::findOrFail(1)->only(['enabled', 'currency', 'monthly_price']),
         ]);
     }

@@ -8,7 +8,7 @@ use Illuminate\Support\Str;
 
 final class PlanFeature extends Model
 {
-    protected $fillable = ['uuid', 'feature_key', 'feature_name', 'enabled', 'limit_value', 'sort_order'];
+    protected $fillable = ['uuid', 'feature_key', 'feature_name', 'description', 'enabled', 'limit_value', 'sort_order'];
 
     protected static function booted(): void
     {

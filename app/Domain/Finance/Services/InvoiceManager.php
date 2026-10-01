@@ -4,6 +4,7 @@ namespace App\Domain\Finance\Services;
 
 use App\Domain\Audit\Contracts\AuditRecorder;
 use App\Domain\Licensing\Services\PaidLicenseService;
+use App\Domain\Partners\CommissionService;
 use App\Domain\Sales\Services\QuotationCalculator;
 use App\Models\Customer;
 use App\Models\Invoice;
@@ -23,8 +24,9 @@ final readonly class InvoiceManager
     public function create(array $data, User $actor): Invoice
     {
         return DB::transaction(function () use ($data, $actor) {
-            $calc = $this->calculator->calculate($this->names($data['items']));
-            $i = Invoice::query()->create([...Arr::except($data, ['items']), 'created_by' => $actor->id, ...Arr::only($calc, ['subtotal', 'discount', 'tax', 'total']), 'amount_paid' => '0.00', 'balance' => $calc['total'], 'status' => 'draft']);
+            $vatRate = \App\Models\BillingSetting::vatRate();
+            $calc = $this->calculator->calculate($this->names($data['items']), $vatRate);
+            $i = Invoice::query()->create([...Arr::except($data, ['items']), 'vat_rate' => $vatRate, 'created_by' => $actor->id, ...Arr::only($calc, ['subtotal', 'discount', 'tax', 'total']), 'amount_paid' => '0.00', 'balance' => $calc['total'], 'status' => 'draft']);
             $i->forceFill(['invoice_number' => sprintf('KBT-INV-%s-%06d', $i->issue_date->format('Y'), $i->id)])->save();
             $i->items()->createMany($calc['items']);
             $this->audit->record('invoice.created', $actor, ['invoice_uuid' => $i->uuid, 'total' => $i->total]);
@@ -40,8 +42,8 @@ final readonly class InvoiceManager
         }
 
         return DB::transaction(function () use ($i, $data, $actor) {
-            $calc = $this->calculator->calculate($this->names($data['items']));
-            $i->update([...Arr::except($data, ['items']), 'created_by' => $i->created_by, ...Arr::only($calc, ['subtotal', 'discount', 'tax', 'total']), 'balance' => $calc['total']]);
+            $calc = $this->calculator->calculate($this->names($data['items']), $i->vat_rate);
+            $i->update([...Arr::except($data, ['items']), 'vat_rate' => $i->vat_rate, 'created_by' => $i->created_by, ...Arr::only($calc, ['subtotal', 'discount', 'tax', 'total']), 'balance' => $calc['total']]);
             $i->items()->delete();
             $i->items()->createMany($calc['items']);
             $this->audit->record('invoice.updated', $actor, ['invoice_uuid' => $i->uuid]);
@@ -79,6 +81,7 @@ final readonly class InvoiceManager
             $status = $remaining === 0 ? 'paid' : 'partially_paid';
             $i->update(['amount_paid' => $this->format($paid), 'balance' => $this->format($remaining), 'status' => $status, 'paid_at' => $remaining === 0 ? now() : null, 'payment_reference' => $data['reference']]);
             app(PaidLicenseService::class)->complete($i, $actor);
+            app(CommissionService::class)->accrue($i);
             $this->audit->record('invoice.payment_recorded', $actor, ['invoice_uuid' => $i->uuid, 'amount' => $this->format($amount), 'reference' => $data['reference']]);
         });
     }

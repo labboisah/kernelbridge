@@ -44,7 +44,8 @@ final class PackageCatalog
             'schema_version' => 1, 'revision' => data_get($subscription->metadata, 'configuration_revision', 1),
             'primary_package' => data_get($subscription->metadata, 'primary_package'),
             'packages' => array_map(function ($key) use ($subscription) {
-                $package = $this->describe($key);
+                $row = collect(data_get($subscription->metadata, 'package_prices', []))->firstWhere('key', $key);
+                $package = $row['configuration'] ?? $this->describe($key);
                 $package['features'] = array_values(array_filter($package['features'],
                     fn ($feature) => in_array($feature['key'], data_get($subscription->metadata, 'licensed_modules', []), true)));
 
@@ -56,11 +57,15 @@ final class PackageCatalog
 
     public function plan(Plan $plan): array
     {
-        return [
-            ...$this->describe($plan->slug), 'uuid' => $plan->uuid,
-            'price' => $plan->price, 'setup_fee' => $plan->setup_fee,
+        $features = $plan->features()->where('enabled', true)->get()->map(fn ($feature) => [
+            'key' => $feature->feature_key, 'name' => $feature->feature_name,
+            'description' => $feature->description ?? config('mediflow.feature_descriptions.'.$feature->feature_key, ''),
+            'required' => in_array($feature->feature_key, ['core', 'access_control'], true), 'enabled' => true,
+        ])->all();
+
+        return ['key' => $plan->slug, 'name' => $plan->name, 'description' => $plan->description,
+            'uuid' => $plan->uuid, 'price' => $plan->price, 'setup_fee' => $plan->setup_fee,
             'currency' => $plan->currency, 'billing_cycle' => $plan->billing_cycle->value,
-            'modules' => $this->features($this->modules([$plan->slug])),
-        ];
+            'features' => $features, 'modules' => $features];
     }
 }

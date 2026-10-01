@@ -103,7 +103,7 @@ const copy = async (key, value) => {
 
                         <section>
                             <div class="mb-2 flex items-center justify-between gap-3">
-                                <h4 class="text-sm font-bold text-slate-700">.env</h4>
+                                <h4 class="text-sm font-bold text-slate-700">.env</h4><a v-if="service.client_setup.download_url" :href="service.client_setup.download_url" class="font-bold text-cyan-700 underline">Download private client settings</a>
                                 <button type="button" class="text-xs font-bold text-cyan-700" @click="copy(`${service.uuid}-env`, service.client_setup.env)">
                                     {{ copied === `${service.uuid}-env` ? 'Copied' : 'Copy' }}
                                 </button>

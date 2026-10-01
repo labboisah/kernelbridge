@@ -31,6 +31,7 @@ abstract class PlanRequest extends FormRequest
             'features' => ['nullable', 'array', 'max:200'],
             'features.*.feature_key' => ['required', 'alpha_dash', 'max:120', 'distinct'],
             'features.*.feature_name' => ['required', 'string', 'max:180'],
+            'features.*.description' => ['nullable', 'string', 'max:3000'],
             'features.*.enabled' => ['required', 'boolean'],
             'features.*.limit_value' => ['nullable', 'string', 'max:255'],
             'limits' => ['nullable', 'array', 'max:200'],

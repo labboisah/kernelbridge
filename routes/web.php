@@ -37,6 +37,31 @@ use App\Http\Controllers\SupportAttachmentController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', HomeController::class)->name('home');
+Route::post('/partners/{type}/register', [\App\Http\Controllers\Partner\RegistrationController::class, 'store'])->middleware(['guest', 'throttle:5,1'])->name('partners.register.store');
+Route::prefix('partner')->name('partner.')->middleware('auth')->group(function () {
+    $controller = \App\Http\Controllers\Partner\PortalController::class;
+    Route::get('/', [$controller, 'dashboard'])->name('dashboard');
+    Route::get('/clients', [$controller, 'customers'])->name('customers');
+    Route::post('/clients', [$controller, 'storeCustomer'])->middleware('throttle:20,1')->name('customers.store');
+    Route::put('/clients/{customer}', [$controller, 'updateCustomer'])->name('customers.update');
+    Route::get('/invoices', [$controller, 'invoices'])->name('invoices');
+    Route::post('/invoices', [$controller, 'storeInvoice'])->middleware('throttle:10,1')->name('invoices.store');
+    Route::get('/invoices/{invoice}', [$controller, 'showInvoice'])->name('invoices.show');
+    Route::post('/invoices/{invoice}/pay', [$controller, 'pay'])->middleware('throttle:10,1')->name('invoices.pay');
+    Route::post('/invoices/{invoice}/payments', [$controller, 'recordPayment'])->middleware('throttle:10,1')->name('payments.store');
+    Route::get('/payments', [$controller, 'payments'])->name('payments');
+    Route::get('/revenue', [$controller, 'revenue'])->name('revenue');
+    Route::get('/support', [$controller, 'support'])->name('support');
+    Route::post('/support', [$controller, 'storeSupport'])->middleware('throttle:10,1')->name('support.store');
+    Route::get('/support/{ticket}', [$controller, 'showSupport'])->name('support.show');
+    Route::post('/support/{ticket}/messages', [$controller, 'reply'])->middleware('throttle:20,1')->name('support.reply');
+});
+Route::get('/partners', [\App\Http\Controllers\PublicSite\PartnerController::class, 'index'])->name('partners.index');
+Route::get('/partners/{type}/register', [\App\Http\Controllers\PublicSite\PartnerController::class, 'start'])->name('partners.register');
+Route::middleware('auth')->group(function () {
+    Route::get('/partners/{type}/onboarding', [\App\Http\Controllers\PublicSite\PartnerController::class, 'edit'])->name('partners.onboarding');
+    Route::post('/partners/{type}/onboarding', [\App\Http\Controllers\PublicSite\PartnerController::class, 'save'])->middleware('throttle:10,1')->name('partners.save');
+});
 Route::get('/health', HealthController::class)->middleware('throttle:30,1')->name('health');
 Route::get('/products', [ProductController::class, 'index'])->name('products.index');
 Route::get('/products/{product:slug}/pricing', [PricingController::class, 'show'])->name('products.pricing');
@@ -98,6 +123,12 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
     Route::post('/support/{ticket:uuid}/messages', [CustomerSupportTicketController::class, 'message'])->name('support.messages.store');
     Route::get('/support-attachments/{attachment:uuid}', SupportAttachmentController::class)->name('support.attachments.show');
     Route::prefix('admin')->name('admin.')->middleware(['role:'.implode('|', UserRole::administrative()), 'throttle:120,1'])->group(function (): void {
+        Route::get('/partner-commissions', [\App\Http\Controllers\Admin\PartnerCommissionController::class, 'index'])->middleware('role:super_admin|admin')->name('partners.commissions');
+        Route::put('/partner-commissions/{product:slug}', [\App\Http\Controllers\Admin\PartnerCommissionController::class, 'update'])->middleware('role:super_admin|admin')->name('partners.commissions.update');
+        Route::get('/partners', [\App\Http\Controllers\Admin\PartnerController::class, 'index'])->middleware('role:super_admin|admin')->name('partners.index');
+        Route::put('/partners/{application}', [\App\Http\Controllers\Admin\PartnerController::class, 'update'])->middleware('role:super_admin|admin')->name('partners.update');
+        Route::get('/billing-settings', [\App\Http\Controllers\Admin\BillingSettingsController::class, 'edit'])->middleware('role:super_admin|admin')->name('billing.edit');
+        Route::put('/billing-settings', [\App\Http\Controllers\Admin\BillingSettingsController::class, 'update'])->middleware('role:super_admin|admin')->name('billing.update');
         Route::get('/hosting', [HostingSettingsController::class, 'edit'])->middleware('role:super_admin|admin')->name('hosting.edit');
         Route::put('/hosting', [HostingSettingsController::class, 'update'])->middleware('role:super_admin|admin')->name('hosting.update');
         Route::get('/', AdminDashboardController::class)->middleware('role:super_admin|admin')->name('dashboard');

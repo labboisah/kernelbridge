@@ -25,7 +25,7 @@ const submit = () => props.invoice ? form.put(route('admin.invoices.update', pro
             <label>Issue date<input v-model="form.issue_date" type="date" required /></label>
             <label>Due date<input v-model="form.due_date" type="date" required /><InputError :message="form.errors.due_date" /></label>
         </div>
-        <section class="space-y-4">
+        <p class="text-sm text-slate-600">New invoices add VAT ({{ Number($page.props.billing.vat_rate) }}%) after discounts. All totals are calculated by the server. Existing invoices retain their recorded tax basis.</p><section class="space-y-4">
             <div class="flex items-center justify-between"><h2 class="text-xl font-bold">Line items</h2><button type="button" class="form-secondary-button" @click="addItem">Add item</button></div>
             <div v-for="(item, index) in form.items" :key="index" class="rounded-xl border p-4">
                 <div class="form-grid">
@@ -35,7 +35,7 @@ const submit = () => props.invoice ? form.put(route('admin.invoices.update', pro
                     <label>Quantity<input v-model="item.quantity" type="number" min="0.01" step="0.01" required /></label>
                     <label>Unit price<input v-model="item.unit_price" type="number" min="0" step="0.01" required /></label>
                     <label>Discount amount<input v-model="item.discount" type="number" min="0" step="0.01" required /></label>
-                    <label>Tax amount<input v-model="item.tax" type="number" min="0" step="0.01" required /></label>
+                    <label v-if="invoice && invoice.vat_rate == null">Legacy tax amount<input v-model="item.tax" type="number" min="0" step="0.01" required /></label>
                 </div>
                 <button v-if="form.items.length > 1" type="button" class="text-sm font-bold text-red-600" @click="form.items.splice(index, 1)">Remove</button>
             </div>

@@ -59,7 +59,7 @@ final class KernelBridgeLicenseClient
             throw new \LogicException('KernelBridge licensing configuration is incomplete.');
         }
 
-        return Http::baseUrl($url)->withToken($token)->acceptJson()->asJson()
+        return Http::baseUrl($url)->withoutRedirecting()->withToken($token)->acceptJson()->asJson()
             ->withHeaders(['X-KernelBridge-Product' => strtoupper($code)])
             ->connectTimeout((int) config('kernelbridge-licensing.connect_timeout_seconds', 3))
             ->timeout((int) config('kernelbridge-licensing.timeout_seconds', 10));
@@ -71,8 +71,15 @@ final class KernelBridgeLicenseClient
             throw new KernelBridgeUnavailableException('KernelBridge licensing is temporarily unavailable.');
         }
         if (! $response->successful() || $response->json('success') !== true || ! is_array($response->json('data'))) {
+            $message = (string) ($response->json('error.message') ?: 'KernelBridge rejected the licensing request.');
+            if ($response->status() === 422 && is_array($response->json('error.details'))) {
+                $details = collect($response->json('error.details'))->flatten()->filter(fn ($value) => is_string($value) && $value !== '')->unique()->values();
+                if ($details->isNotEmpty()) {
+                    $message = $details->implode(' ');
+                }
+            }
             throw new KernelBridgeApiException(
-                (string) ($response->json('error.message') ?: 'KernelBridge rejected the licensing request.'),
+                $message,
                 (string) ($response->json('error.code') ?: 'license_rejected'),
                 $response->status(),
             );

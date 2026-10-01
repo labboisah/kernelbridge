@@ -47,6 +47,7 @@ final readonly class SubscriptionService
             $subscription->update(['invoice_id' => $invoice->id, 'status' => SubscriptionStatus::Active, 'starts_at' => $start, 'ends_at' => $end, 'grace_ends_at' => null]);
             $this->entitlements->snapshot($subscription, $subscription->plan);
             $this->change($subscription, 'activated', $subscription->plan, $subscription->plan, $actor, $before, 'Paid invoice activation');
+            app(\App\Domain\Partners\CommissionService::class)->accrue($invoice);
 
             return $subscription->refresh();
         });
@@ -82,6 +83,7 @@ final readonly class SubscriptionService
             $subscription->update(['invoice_id' => $invoice->id, 'status' => SubscriptionStatus::Active, 'starts_at' => $start, 'ends_at' => $this->cycleEnd($start, $subscription->billing_cycle), 'grace_ends_at' => null, 'price' => data_get($subscription->metadata, 'selected_packages') ? $subscription->price : $subscription->plan->price, 'currency' => $subscription->plan->currency, 'renewal_notice_sent_at' => null]);
             $this->entitlements->snapshot($subscription, $subscription->plan);
             $this->change($subscription, 'renewed', $subscription->plan, $subscription->plan, $actor, $before, 'Paid renewal');
+            app(\App\Domain\Partners\CommissionService::class)->accrue($invoice);
 
             return $subscription->refresh();
         });

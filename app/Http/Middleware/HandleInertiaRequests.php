@@ -33,11 +33,14 @@ class HandleInertiaRequests extends Middleware
             ...parent::share($request),
             'auth' => [
                 'user' => $request->user(),
+                'is_partner' => fn (): bool => $request->user()?->isPartner() ?? false,
+                'approved_agent' => fn (): bool => $request->user()?->isApprovedAgent() ?? false,
                 'roles' => fn (): array => $request->user()?->getRoleNames()->all() ?? [],
                 'permissions' => fn (): array => $request->user()?->getAllPermissions()->pluck('name')->all() ?? [],
             ],
             'flash' => ['success' => fn (): ?string => $request->session()->get('success'), 'error' => fn (): ?string => $request->session()->get('error')],
             'app' => ['url' => config('app.url')],
+            'billing' => fn (): array => ['vat_rate' => \App\Models\BillingSetting::vatRate()],
         ];
     }
 }

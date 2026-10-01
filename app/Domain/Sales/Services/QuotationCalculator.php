@@ -7,7 +7,7 @@ use Illuminate\Validation\ValidationException;
 final class QuotationCalculator
 {
     /** @param list<array<string,mixed>> $items @return array{subtotal:string,discount:string,tax:string,total:string,items:list<array<string,mixed>>} */
-    public function calculate(array $items): array
+    public function calculate(array $items, ?string $vatRate = null): array
     {
         $subtotal = 0;
         $discount = 0;
@@ -21,7 +21,11 @@ final class QuotationCalculator
             $gross = (int) round($quantity * $unit / 100);
             if ($itemDiscount > $gross) {
                 throw ValidationException::withMessages(["items.$index.discount" => 'Item discount cannot exceed its gross amount.']);
-            }$total = $gross - $itemDiscount + $itemTax;
+            }
+            if ($vatRate !== null) {
+                $itemTax = (int) round(($gross - $itemDiscount) * $this->minor($vatRate) / 10000);
+            }
+            $total = $gross - $itemDiscount + $itemTax;
             $subtotal += $gross;
             $discount += $itemDiscount;
             $tax += $itemTax;

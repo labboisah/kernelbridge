@@ -13,6 +13,7 @@ final class HomeController extends Controller
     public function __invoke(): Response
     {
         return Inertia::render('Public/Home', [
+            'partnerTypes' => config('partners'),
             'products' => ProductResource::collection(Product::query()->featured()->get())->resolve(),
             'activeProductCount' => Product::query()->featured()->count(),
         ]);

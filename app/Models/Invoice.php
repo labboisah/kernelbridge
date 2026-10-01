@@ -13,7 +13,7 @@ final class Invoice extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['uuid', 'invoice_number', 'quotation_id', 'customer_id', 'issue_date', 'due_date', 'subtotal', 'discount', 'tax', 'total', 'amount_paid', 'balance', 'currency', 'status', 'notes', 'terms', 'payment_reference', 'created_by', 'issued_at', 'paid_at', 'cancelled_at'];
+    protected $fillable = ['vat_rate', 'uuid', 'invoice_number', 'quotation_id', 'customer_id', 'issue_date', 'due_date', 'subtotal', 'discount', 'tax', 'total', 'amount_paid', 'balance', 'currency', 'status', 'notes', 'terms', 'payment_reference', 'created_by', 'issued_at', 'paid_at', 'cancelled_at'];
 
     protected static function booted(): void
     {
@@ -23,7 +23,7 @@ final class Invoice extends Model
 
     protected function casts(): array
     {
-        return ['issue_date' => 'date', 'due_date' => 'date', 'subtotal' => 'decimal:2', 'discount' => 'decimal:2', 'tax' => 'decimal:2', 'total' => 'decimal:2', 'amount_paid' => 'decimal:2', 'balance' => 'decimal:2', 'status' => InvoiceStatus::class, 'issued_at' => 'datetime', 'paid_at' => 'datetime', 'cancelled_at' => 'datetime'];
+        return ['vat_rate' => 'decimal:2', 'issue_date' => 'date', 'due_date' => 'date', 'subtotal' => 'decimal:2', 'discount' => 'decimal:2', 'tax' => 'decimal:2', 'total' => 'decimal:2', 'amount_paid' => 'decimal:2', 'balance' => 'decimal:2', 'status' => InvoiceStatus::class, 'issued_at' => 'datetime', 'paid_at' => 'datetime', 'cancelled_at' => 'datetime'];
     }
 
     public function items(): HasMany

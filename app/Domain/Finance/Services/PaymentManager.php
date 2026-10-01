@@ -61,6 +61,7 @@ final readonly class PaymentManager
             $payment->update(['status' => PaymentStatus::Verified, 'verified_by' => $actor->id, 'verified_at' => now()]);
             foreach ($payment->allocations()->with('invoice')->get() as $allocation) {
                 app(PaidLicenseService::class)->complete($allocation->invoice, $actor);
+                app(\App\Domain\Partners\CommissionService::class)->accrue($allocation->invoice);
             }
             $this->audit->record('payment.verified', $payment, $actor, ['allocations' => $allocations]);
 
@@ -100,6 +101,7 @@ final readonly class PaymentManager
                 }
                 $invoice = Invoice::query()->lockForUpdate()->findOrFail($allocation->invoice_id);
                 $this->reverseInvoice($invoice, $this->minor($allocation->amount));
+                app(\App\Domain\Partners\CommissionService::class)->reverse($invoice);
                 foreach (Subscription::query()->where('invoice_id', $invoice->id)->get() as $subscription) {
                     if (data_get($subscription->metadata, 'selected_packages')) {
                         $subscription->update(['status' => 'suspended']);

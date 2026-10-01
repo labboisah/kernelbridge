@@ -31,8 +31,8 @@ final class InvoiceManagementTest extends TestCase
         $payload += ['subtotal' => 1, 'total' => 1, 'balance' => 1];
         $this->actingAs($this->admin())->post(route('admin.invoices.store'), $payload)->assertRedirect();
         $invoice = Invoice::query()->firstOrFail();
-        $this->assertSame('2050.00', $invoice->total);
-        $this->assertSame('2050.00', $invoice->balance);
+        $this->assertSame('2042.50', $invoice->total);
+        $this->assertSame('2042.50', $invoice->balance);
         $this->assertSame('0.00', $invoice->amount_paid);
         $this->assertSame('KBT-INV-'.now()->year.'-000001', $invoice->invoice_number);
         $this->assertCount(1, $invoice->items);
@@ -49,8 +49,8 @@ final class InvoiceManagementTest extends TestCase
         Notification::assertSentOnDemand(InvoiceIssued::class);
         $this->actingAs($admin)->post(route('admin.invoices.payments.store', $invoice), $this->payment('500.00', 'PARTIAL'))->assertRedirect();
         $this->assertSame('partially_paid', $invoice->fresh()->status->value);
-        $this->assertSame('1550.00', $invoice->fresh()->balance);
-        $this->actingAs($admin)->post(route('admin.invoices.payments.store', $invoice), $this->payment('1550.00', 'FINAL'))->assertRedirect();
+        $this->assertSame('1542.50', $invoice->fresh()->balance);
+        $this->actingAs($admin)->post(route('admin.invoices.payments.store', $invoice), $this->payment('1542.50', 'FINAL'))->assertRedirect();
         $this->assertSame('paid', $invoice->fresh()->status->value);
         $this->assertSame('0.00', $invoice->fresh()->balance);
         $this->actingAs($admin)->post(route('admin.invoices.payments.store', $invoice), $this->payment('1.00', 'EXTRA'))->assertForbidden();

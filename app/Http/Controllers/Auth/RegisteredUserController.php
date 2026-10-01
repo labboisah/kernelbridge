@@ -34,6 +34,8 @@ class RegisteredUserController extends Controller
         event(new Registered($user));
 
         Auth::login($user);
+        $request->session()->regenerate();
+        $request->session()->forget('partner_registration');
 
         return redirect()->intended(route('dashboard', absolute: false));
     }

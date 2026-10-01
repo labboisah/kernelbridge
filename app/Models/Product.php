@@ -26,7 +26,7 @@ final class Product extends Model
 
     protected function casts(): array
     {
-        return ['features' => 'array', 'benefits' => 'array', 'workflow' => 'array', 'platform_components' => 'array', 'screenshots' => 'array', 'plans' => 'array', 'metadata' => 'array', 'is_featured' => 'boolean', 'status' => ProductStatus::class];
+        return ['vat_commission_rate' => 'decimal:2', 'developer_commission_rate' => 'decimal:2', 'platform_commission_rate' => 'decimal:2', 'staff_commission_rate' => 'decimal:2', 'partner_commission_rate' => 'decimal:2', 'features' => 'array', 'benefits' => 'array', 'workflow' => 'array', 'platform_components' => 'array', 'screenshots' => 'array', 'plans' => 'array', 'metadata' => 'array', 'is_featured' => 'boolean', 'status' => ProductStatus::class];
     }
 
     public function scopePublished(Builder $query): Builder

@@ -8,6 +8,7 @@ use App\Models\Product;
 use App\Models\User;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 final readonly class PlanManager
 {
@@ -54,6 +55,12 @@ final readonly class PlanManager
     /** @param array<string, mixed> $data */
     private function synchronizeEntitlements(Plan $plan, array $data): void
     {
+        if ($plan->product->code === 'MEDIFLOW' && array_key_exists($plan->slug, config('mediflow.packages'))) {
+            $enabled = collect($data['features'] ?? [])->where('enabled', true)->pluck('feature_key')->all();
+            if (array_diff(['core', 'access_control'], $enabled)) {
+                throw ValidationException::withMessages(['features' => 'MediFlow packages must include enabled core and access_control features.']);
+            }
+        }
         $plan->features()->delete();
         foreach (array_values($data['features'] ?? []) as $index => $feature) {
             $plan->features()->create([...$feature, 'sort_order' => $index]);

@@ -70,6 +70,17 @@ final class LicensingClientTest extends TestCase
         Route::middleware('web')->get('/client-dashboard', fn (): string => 'client app dashboard');
     }
 
+    public function test_activation_displays_field_validation_details(): void
+    {
+        Http::fake(['*' => Http::response(['success' => false, 'error' => [
+            'code' => 'validation_failed', 'message' => 'The request data is invalid.',
+            'details' => ['license_key' => ['License is invalid or inactive.']],
+        ]], 422)]);
+        $this->expectException(KernelBridgeApiException::class);
+        $this->expectExceptionMessage('License is invalid or inactive.');
+        $this->activation->activate('KBT-TEST');
+    }
+
     public function test_activation_persists_encrypted_signed_state_and_uses_machine_credentials(): void
     {
         $this->fakeSuccessfulApi();

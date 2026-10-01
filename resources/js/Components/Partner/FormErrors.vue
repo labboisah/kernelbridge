@@ -1,0 +1,1 @@
+<script setup>defineProps({ errors: Object });</script><template><ul v-if="Object.keys(errors).length" role="alert" class="rounded-lg bg-red-50 p-4 text-sm text-red-700"><li v-for="(message,key) in errors" :key="key">{{ message }}</li></ul></template>

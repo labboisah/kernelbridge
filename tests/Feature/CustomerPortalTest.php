@@ -167,7 +167,7 @@ final class CustomerPortalTest extends TestCase
 
         $this->post(route('portal.invoices.pay-online', $invoice))->assertRedirect('https://checkout.flutterwave.test/pay/123');
         $reference = Payment::query()->where('provider', 'flutterwave')->value('transaction_reference');
-        Http::fake(['https://api.flutterwave.com/v3/transactions/98765/verify' => Http::response(['status' => 'success', 'data' => ['id' => 98765, 'status' => 'successful', 'amount' => $plan->price, 'currency' => $plan->currency, 'tx_ref' => $reference, 'payment_type' => 'card']])]);
+        Http::fake(['https://api.flutterwave.com/v3/transactions/98765/verify' => Http::response(['status' => 'success', 'data' => ['id' => 98765, 'status' => 'successful', 'amount' => $invoice->total, 'currency' => $plan->currency, 'tx_ref' => $reference, 'payment_type' => 'card']])]);
         $this->get(route('payments.flutterwave.callback', ['status' => 'successful', 'tx_ref' => $reference, 'transaction_id' => '98765']))->assertRedirect(route('portal.invoices.show', $invoice));
         $this->get(route('payments.flutterwave.callback', ['status' => 'successful', 'tx_ref' => $reference, 'transaction_id' => '98765']))->assertRedirect(route('portal.invoices.show', $invoice));
 

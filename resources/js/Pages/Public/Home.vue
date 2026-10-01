@@ -1,11 +1,12 @@
 <script setup>
+import PartnerSection from '@/Components/Public/PartnerSection.vue';
 import HeroSection from '@/Components/Public/HeroSection.vue';
 import ProductCard from '@/Components/Public/ProductCard.vue';
 import SeoHead from '@/Components/Public/SeoHead.vue';
 import PublicLayout from '@/Layouts/PublicLayout.vue';
 import { Link } from '@inertiajs/vue3';
 
-defineProps({ products: { type: Array, required: true }, activeProductCount: { type: Number, required: true } });
+defineProps({ partnerTypes: { type: Object, required: true }, products: { type: Array, required: true }, activeProductCount: { type: Number, required: true } });
 
 const services = [
     { number: '01', title: 'Custom Software Development', description: "Purpose-built systems around your organisation's workflow, reporting and operational requirements." },
@@ -81,5 +82,6 @@ const services = [
                 </div>
             </div>
         </section>
+        <PartnerSection :types="partnerTypes"/>
     </PublicLayout>
 </template>

@@ -3,7 +3,7 @@ import { Link } from '@inertiajs/vue3';
 import { ref } from 'vue';
 const open = ref(false);
 defineProps({ overlay: { type: Boolean, default: false } });
-const links = [{ label: 'Products', route: 'products.index', active: 'products.*' }, { label: 'Services', route: 'services', active: 'services' }, { label: 'Docs', route: 'docs.licensing', active: 'docs.*' }, { label: 'About', route: 'about', active: 'about' }, { label: 'Contact', route: 'contact', active: 'contact' }];
+const links = [{ label: 'Partners', route: 'partners.index', active: 'partners.*' }, { label: 'Products', route: 'products.index', active: 'products.*' }, { label: 'Services', route: 'services', active: 'services' }, { label: 'Docs', route: 'docs.licensing', active: 'docs.*' }, { label: 'About', route: 'about', active: 'about' }, { label: 'Contact', route: 'contact', active: 'contact' }];
 </script>
 <template>
     <header class="z-50 w-full border-b" :class="overlay ? 'absolute top-0 border-white/10 bg-[#061a35] text-white' : 'sticky top-0 border-slate-200 bg-white'">

@@ -16,8 +16,11 @@ use Inertia\Response;
 
 final class DashboardController extends Controller
 {
-    public function __invoke(Request $request): Response
+    public function __invoke(Request $request): Response|\Illuminate\Http\RedirectResponse
     {
+        if ($request->user()->isPartner()) {
+            return redirect()->route('partner.dashboard');
+        }
         $customers = $request->user()->customers()->get();
         $customerIds = $customers->pluck('id');
         $subscriptions = Subscription::query()->whereIn('customer_id', $customerIds)->with(['product:id,uuid,name,code', 'plan:id,uuid,name'])->latest()->get();

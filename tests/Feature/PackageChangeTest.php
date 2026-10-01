@@ -51,16 +51,16 @@ class PackageChangeTest extends TestCase
     {
         $subscription = $this->subscription([$this->pharmacy->uuid]);
         $this->postJson(route('portal.licenses.preview', $subscription), ['packages' => [$this->pharmacy->uuid, $this->clinic->uuid]])
-            ->assertOk()->assertJsonPath('charge', '100.00')->assertJsonPath('credit', '0.00');
+            ->assertOk()->assertJsonPath('charge', '107.50')->assertJsonPath('vat', '7.50')->assertJsonPath('credit', '0.00');
         $this->assertDatabaseCount('subscription_package_orders', 0);
         $this->post(route('portal.licenses.change', $subscription), ['packages' => [$this->pharmacy->uuid, $this->clinic->uuid], 'use_credit' => false, 'charge' => '0.01'])
             ->assertSessionHasNoErrors()->assertRedirect();
         $order = SubscriptionPackageOrder::query()->sole();
-        $this->assertSame('100.00', $order->invoice->total);
+        $this->assertSame('107.50', $order->invoice->total);
         $this->assertFalse($subscription->entitlements()->whereNull('effective_until')->where('feature_key', 'doctor')->exists());
         $this->pay($order->invoice, '25.00');
         $this->assertSame(['pharmacy'], $subscription->fresh()->metadata['selected_packages']);
-        $this->pay($order->invoice->fresh(), '75.00');
+        $this->pay($order->invoice->fresh(), '82.50');
         $this->assertSame(['pharmacy', 'general_clinic'], $subscription->fresh()->metadata['selected_packages']);
         $this->assertTrue($subscription->entitlements()->whereNull('effective_until')->where('feature_key', 'doctor')->exists());
         $this->assertSame('applied', $order->fresh()->status);
@@ -89,10 +89,10 @@ class PackageChangeTest extends TestCase
         $this->travelTo($subscription->ends_at->copy()->addSecond());
         $this->post(route('portal.licenses.renew', $subscription), ['use_credit' => true])->assertSessionHasNoErrors();
         $order = SubscriptionPackageOrder::query()->sole();
-        $this->assertSame('200.00', $order->invoice->total);
-        $this->assertSame('150.00', $order->invoice->balance);
+        $this->assertSame('215.00', $order->invoice->total);
+        $this->assertSame('165.00', $order->invoice->balance);
         $this->assertSame(0, app(CustomerCreditService::class)->balance($this->customer->id, 'NGN'));
-        $this->pay($order->invoice, '150.00');
+        $this->pay($order->invoice, '165.00');
         $this->assertTrue($subscription->fresh()->ends_at->isFuture());
         $this->assertTrue($subscription->license->fresh()->expires_at->isFuture());
         $this->assertSame($licenseId, $subscription->fresh()->license->id);
@@ -106,11 +106,11 @@ class PackageChangeTest extends TestCase
         $invoice = app(PackageChangeService::class)->change($subscription, [$this->clinic->uuid], $this->user, true);
         $this->assertSame('paid', $invoice->status->value);
         $this->assertSame('0.00', $invoice->balance);
-        $this->assertSame(40000, app(CustomerCreditService::class)->balance($this->customer->id, 'NGN'));
+        $this->assertSame(39250, app(CustomerCreditService::class)->balance($this->customer->id, 'NGN'));
         $this->assertSame(['general_clinic'], $subscription->fresh()->metadata['selected_packages']);
         $this->assertSame('account_credit', $invoice->payments()->sole()->method);
         $this->post(route('portal.invoices.credit', $invoice))->assertSessionHasNoErrors();
-        $this->assertSame(40000, app(CustomerCreditService::class)->balance($this->customer->id, 'NGN'));
+        $this->assertSame(39250, app(CustomerCreditService::class)->balance($this->customer->id, 'NGN'));
     }
 
     public function test_pending_changes_block_duplicates_and_can_be_cancelled_without_unlocking_features(): void
@@ -131,7 +131,7 @@ class PackageChangeTest extends TestCase
         $this->travelTo($subscription->ends_at->copy()->addDay());
         $this->pay($invoice, $invoice->total);
         $this->assertSame('credited', SubscriptionPackageOrder::query()->sole()->status);
-        $this->assertSame(10000, app(CustomerCreditService::class)->balance($this->customer->id, 'NGN'));
+        $this->assertSame(10750, app(CustomerCreditService::class)->balance($this->customer->id, 'NGN'));
         $this->assertSame(['pharmacy'], $subscription->fresh()->metadata['selected_packages']);
     }
 

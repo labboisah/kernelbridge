@@ -3,6 +3,7 @@
 namespace App\Domain\Sales\Services;
 
 use App\Domain\Audit\Contracts\AuditRecorder;
+use App\Domain\Finance\Services\InvoiceManager;
 use App\Models\Invoice;
 use App\Models\Plan;
 use App\Models\Product;
@@ -82,9 +83,11 @@ final readonly class QuotationManager
                 return Invoice::query()->where('quotation_id', $q->id)->firstOrFail();
             }if ($q->status->value !== 'accepted') {
                 throw ValidationException::withMessages(['status' => 'Only accepted quotations can be converted.']);
-            }$invoice = Invoice::query()->create(['quotation_id' => $q->id, 'customer_id' => $q->customer_id, 'issue_date' => today(), 'due_date' => today()->addDays(30), 'subtotal' => $q->subtotal, 'discount' => $q->discount, 'tax' => $q->tax, 'total' => $q->total, 'amount_paid' => 0, 'balance' => $q->total, 'currency' => $q->currency, 'status' => 'draft', 'notes' => $q->notes, 'terms' => $q->terms, 'created_by' => $actor->id]);
-            $invoice->forceFill(['invoice_number' => sprintf('KBT-INV-%s-%06d', today()->format('Y'), $invoice->id)])->save();
-            $invoice->items()->createMany($q->items->map(fn ($i) => Arr::except($i->toArray(), ['id', 'uuid', 'quotation_id', 'created_at', 'updated_at']))->all());
+            }$invoice = app(InvoiceManager::class)->create([
+                'quotation_id' => $q->id, 'customer_id' => $q->customer_id, 'issue_date' => today(),
+                'due_date' => today()->addDays(30), 'currency' => $q->currency, 'notes' => $q->notes, 'terms' => $q->terms,
+                'items' => $q->items->map(fn ($item) => Arr::only($item->toArray(), ['product_id', 'plan_id', 'description', 'quantity', 'unit_price', 'discount', 'tax']))->all(),
+            ], $actor);
             $q->update(['status' => 'converted']);
             $this->audit->record('quotation.converted', $actor, ['quotation_uuid' => $q->uuid, 'invoice_uuid' => $invoice->uuid]);
 

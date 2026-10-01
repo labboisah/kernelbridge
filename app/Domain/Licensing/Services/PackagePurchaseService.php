@@ -48,13 +48,13 @@ final readonly class PackagePurchaseService
                 if ((float) $plan->setup_fee > 0) {
                     $items[] = ['product_id' => $plan->product_id, 'plan_id' => $plan->id, 'description' => $plan->name.' - one-time setup', 'quantity' => 1, 'unit_price' => $plan->setup_fee, 'discount' => 0, 'tax' => 0];
                 }
-                $packageModules = config('mediflow.packages.'.$plan->slug.'.modules');
-                $modules = array_merge($modules, in_array('*', $packageModules, true) ? array_keys(config('mediflow.modules')) : $packageModules);
+                $packageModules = array_column(app(PackageCatalog::class)->plan($plan)['features'], 'key');
+                $modules = array_merge($modules, $packageModules);
             }
             $invoice = $this->invoices->create([
                 'customer_id' => $customer->id, 'issue_date' => today(), 'due_date' => today()->addDays(7),
                 'currency' => $primary->currency, 'items' => $items,
-                'notes' => 'MediFlow packages for one licensed computer.',
+                'notes' => 'MediFlow packages for one licensed computer.'.(($implementation['mode'] ?? 'local') === 'online' ? ' Online implementation: domain and VPS prepaid for '.$implementation['months'].' months. Preferred domain: '.($implementation['domain'] ?: 'To be confirmed').'. Domain availability and provisioning are coordinated by support.' : ''),
                 'terms' => 'An activation code is issued after full payment is verified. This licence is bound to the first activated computer.',
             ], $actor);
             $this->subscriptions->create($customer, $primary, $invoice, $actor, [
@@ -64,7 +64,7 @@ final readonly class PackagePurchaseService
                     'selected_packages' => $plans->pluck('slug')->values()->all(),
                     'package_names' => $plans->pluck('name')->values()->all(),
                     'licensed_modules' => array_values(array_unique($modules)),
-                    'package_prices' => $plans->map(fn (Plan $p) => ['uuid' => $p->uuid, 'key' => $p->slug, 'price' => $p->price, 'setup_fee' => $p->setup_fee])->all(),
+                    'package_prices' => $plans->map(fn (Plan $p) => ['uuid' => $p->uuid, 'key' => $p->slug, 'price' => $p->price, 'setup_fee' => $p->setup_fee, 'configuration' => app(PackageCatalog::class)->plan($p)])->all(),
                 ],
             ]);
 

@@ -67,7 +67,9 @@ final class QuotationManagementTest extends TestCase
         $this->actingAs($admin)->post(route('admin.quotations.convert', $q))->assertRedirect();
         $this->assertSame('converted', $q->fresh()->status->value);
         $invoice = Invoice::query()->firstOrFail();
-        $this->assertSame($q->total, $invoice->total);
+        $this->assertSame('2042.50', $invoice->total);
+        $this->assertSame('7.50', $invoice->vat_rate);
+        $this->assertSame('142.50', $invoice->tax);
         $this->assertSame('KBT-INV-'.now()->year.'-000001', $invoice->invoice_number);
         $this->assertCount(1, $invoice->items);
         $this->actingAs($admin)->post(route('admin.quotations.convert', $q->fresh()))->assertForbidden();

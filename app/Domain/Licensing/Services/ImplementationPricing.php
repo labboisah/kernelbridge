@@ -28,6 +28,6 @@ final class ImplementationPricing
             return [];
         }
 
-        return [['product_id' => $productId, 'description' => 'Online implementation - domain and VPS ('.$selection['months'].' months prepaid)', 'quantity' => $selection['months'], 'unit_price' => $selection['monthly_price'], 'discount' => 0, 'tax' => 0]];
+        return [['product_id' => $productId, 'plan_id' => null, 'description' => 'Online implementation - domain and VPS ('.$selection['months'].' months prepaid)', 'quantity' => $selection['months'], 'unit_price' => $selection['monthly_price'], 'discount' => 0, 'tax' => 0]];
     }
 }

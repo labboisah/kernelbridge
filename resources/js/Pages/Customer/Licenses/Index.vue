@@ -45,7 +45,7 @@ const copy = async key => { try { await navigator.clipboard.writeText(key); } ca
             <div v-if="currentOrder" class="mt-4 rounded-xl bg-cyan-50 p-4 text-sm">
                 You already have a {{ currentOrder.status }} MediFlow service.
                 <Link v-if="currentOrder.invoice" :href="route('portal.invoices.show', currentOrder.invoice.uuid)" class="font-bold text-cyan-800 underline">View invoice {{ currentOrder.invoice.number }}</Link>
-                <p class="mt-1">Manage purchased packages below. Contact support to replace a licensed computer.</p>
+                <p class="mt-1">Manage purchased packages below. Contact support to replace a licensed computer.</p><a :href="`#packages-${currentOrder.uuid}`" class="mt-3 inline-block rounded-lg bg-cyan-700 px-4 py-2 font-bold text-white">Change or add packages</a>
             </div>
             <form v-else class="mt-5" @submit.prevent="purchase">
                 <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">

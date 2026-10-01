@@ -27,6 +27,6 @@ final class InvoiceIssued extends Notification implements ShouldQueue
     {
         $url = URL::temporarySignedRoute('invoices.customer.show', now()->addDays(60), ['invoice' => $this->invoice]);
 
-        return (new MailMessage)->subject("Invoice {$this->invoice->invoice_number}")->greeting("Hello {$this->invoice->customer->name},")->line('Your KernelBridge invoice is ready.')->line("Amount due: {$this->invoice->currency} {$this->invoice->balance}")->action('View invoice', $url);
+        return (new MailMessage)->subject("Invoice {$this->invoice->invoice_number}")->greeting("Hello {$this->invoice->customer->name},")->line('Your KernelBridge invoice is ready.')->line($this->invoice->vat_rate !== null ? 'VAT ('.((float) $this->invoice->vat_rate).'%): '.$this->invoice->currency.' '.$this->invoice->tax : 'Tax: '.$this->invoice->currency.' '.$this->invoice->tax)->line("Amount due: {$this->invoice->currency} {$this->invoice->balance}")->action('View invoice', $url);
     }
 }

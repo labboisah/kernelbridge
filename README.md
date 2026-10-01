@@ -193,3 +193,54 @@ Focused verification:
     php artisan test --filter="CentralLicensingTest|InstallationSetupTest"
 
 Concurrency protection uses row locks but the SQLite tests are not a production MySQL load test.
+
+
+### Account checkout and online implementation
+
+Request this plan opens /account/checkout and preserves the selected plan through login or registration. Customers review features, local/online implementation and server-calculated invoice totals before proceeding to Flutterwave. The combined domain/VPS rate starts at NGN 20,000 per month. Administrators control availability, currency and price under Administration > Catalogue > Online implementation (/admin/hosting). Hosting is prepaid for the software term (1/3/6/12 months); MediFlow package renewals retain the contracted hosting rate. Package-removal credits exclude hosting fees. Domain requests do not reserve a domain or automatically create a VPS; support coordinates fulfilment.
+
+Apply database/migrations/2026_10_01_000002_create_checkout_settings_and_client_bundles.php. Full verified payment provisions one encrypted client setup bundle with a subscription-restricted API token and independent cache-signing secret. The paid invoice and account service expose a private .env download to its customer only. Merge it into the client environment without replacing APP_KEY or database credentials, clear its configuration cache, and activate through /license. No platform Flutterwave keys or master product credentials are included. Configure APP_URL with a licensing URL reachable by the client before distributing settings.
+
+
+### Managing plan prices and features
+
+Use Administration > Products > Plans, prices & features for each product. The existing plans, plan_features and plan_limits tables store the commercial catalogue; product_features stores product-level marketing features. Plan feature descriptions are added by migration 2026_10_01_000003_add_description_to_plan_features.php. Set the price, currency, billing cycle and setup fee in the plan editor to publish a numeric amount. Unpriced MediFlow plans remain request-priced until an administrator supplies the actual software rates; the hosting rate is independent.
+
+MediFlow package selection and checkout use saved enabled plan features, names and descriptions. New purchases snapshot these features so later catalogue edits do not silently change existing installations. Package additions use the current catalogue, while retained packages keep their purchased feature snapshot. Core and access_control must remain enabled. The MediFlow seeder initializes features only for newly created package plans and does not restore features removed by an administrator.
+
+
+### Partner portal
+
+- Public partner programmes at `/partners` cover developers, sales agents and investors. Customers register separately at `/register`.
+- Partner registration creates an email/password login and a draft application without creating a customer billing account. Subsequent partner sign-ins open `/partner`.
+- Admins review submissions at `/admin/partners`. Only approved sales agents can manage their own clients, prepare subscription invoices, submit payments, and open/reply to client support requests. Partner users receive no staff permissions.
+- Configure percentage commissions per product at `/admin/partner-commissions`. The default rate is 0%. Rates are recorded when commissions are earned and later rate changes do not change existing entries.
+- Commission accrues once per product/invoice when the subscription is active and the invoice is fully settled. Initial purchases, paid renewals and paid package additions are supported. The base is subscription line totals after discounts, excluding tax and non-plan charges, prorated to verified cash funding; credits do not earn commission twice. A refund reverses the affected invoice commission. Commission balances are grouped by currency.
+- The revenue page separates earned commissions from verified client collections and outstanding client invoices. It records earnings, not commission payouts. Offline payments remain pending until finance verifies them; Flutterwave payments use the existing server-side verification workflow.
+- Apply migrations `2026_10_01_000005_add_partner_owner_to_customers` and `2026_10_01_000006_create_partner_commissions` after the partner-applications migration, then refresh the configuration cache and rebuild frontend assets for other installations.
+
+
+### System roles and invoice VAT
+
+- Investor (`investor`), Agent (`agent`), Developer (`developer`) and Customer (`customer`) are listed in Admin > Access control. The internal sales role remains separate from partner agents. Partner registration assigns the corresponding role; existing partner applications are backfilled by migration `2026_10_01_000007_add_partner_roles_and_invoice_vat`. Agent operations still require an approved application.
+- New invoices add VAT at the rate set in Admin > Finance > VAT settings (initially 7.5%) to each line after discounts, rounded to two decimal places. Subtotal, discount, VAT and the tax-inclusive total are displayed separately on the invoice. Checkout and package-change previews include VAT. Server calculations override submitted tax amounts for these invoices.
+- The invoice stores its VAT rate. Existing invoices keep their original amounts and tax basis; editing an existing draft uses that stored basis. Converting an accepted quotation creates a new invoice using the current configured VAT rate.
+- Subscription activation requires the full VAT-inclusive invoice balance to be settled. Partner commission remains based on eligible subscription charges excluding tax.
+
+VAT settings are stored in `billing_settings`. Apply migration `2026_10_01_000008_create_billing_settings_table` on other installations. Only administrators can change the rate (0?100%, up to two decimal places); changes apply to new invoices and previews without retaxing existing invoices.
+
+
+### Product commission allocation
+
+Admin > Finance > Commission settings uses one product selector and one form for Developer, Platform, Staff and Agent percentages. All four fields are required and must total exactly 100%. Migration `2026_10_01_000009_add_product_commission_shares` preserves existing agent rates and assigns the remainder to Platform, with Developer and Staff initially 0%.
+
+The table below the form shows saved allocations and calculates all four amounts for an editable eligible revenue amount, excluding VAT. These are illustrative calculations, not payout records. Minor-unit rounding is distributed to preserve the exact input total. Agent earnings continue to use the saved agent percentage and existing earned entries retain their original rates.
+
+
+### VAT allocation and generated commissions
+
+Commission settings now split VAT, Developer, Platform, Staff and Agent shares to exactly 100%. The VAT allocation percentage is a revenue allocation setting, separate from the VAT rate used to calculate customer invoices. The calculator uses subscription receipts including invoice VAT; hosting and credit-funded portions remain excluded.
+
+Migration `2026_10_01_000010_add_vat_commission_allocation` introduces the fifth share using the current VAT setting, reducing Platform first (then Staff, Developer, Agent only if needed) so existing allocations still total 100%. Existing earned commissions are not recalculated.
+
+New successful subscription payments snapshot all five allocations in `product_commission_accruals`. The product table reports generated Developer + Platform + Staff + Agent totals by currency and shows allocated VAT separately. Refunds reverse accruals. Historical agent earnings are included without inventing unrecorded historical allocations for other parties. Generated amounts represent allocations, not completed payouts; agent payout attribution still requires an approved agent client relationship.

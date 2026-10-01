@@ -288,6 +288,7 @@ final class PortalController extends Controller
             'product_code' => $productCode,
             'license_key' => $licenseKey,
             'has_license' => (bool) $licenseKey,
+            'download_url' => $licenseKey && ClientSetupBundle::where('subscription_id', $subscription->id)->exists() ? route('portal.services.environment', $subscription) : null,
             'env' => $env,
             'composer_commands' => implode("\n", [
                 'composer config repositories.kernelbridge path ../kernelbridge/packages/kernelbridge/licensing-client-laravel',
