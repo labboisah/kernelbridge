@@ -10,6 +10,7 @@ use KernelBridge\LicensingClient\Http\Middleware\FeatureMiddleware;
 use KernelBridge\LicensingClient\Http\Middleware\LicenseMiddleware;
 use KernelBridge\LicensingClient\Http\Middleware\LimitMiddleware;
 use KernelBridge\LicensingClient\Jobs\VerifyLicenseJob;
+use KernelBridge\LicensingClient\Services\DeviceIdentity;
 
 final class KernelBridgeLicensingServiceProvider extends ServiceProvider
 {
@@ -17,6 +18,7 @@ final class KernelBridgeLicensingServiceProvider extends ServiceProvider
     {
         $this->mergeConfigFrom(__DIR__.'/../config/kernelbridge-licensing.php', 'kernelbridge-licensing');
         $this->app->singleton(KernelBridgeLicenseClient::class);
+        $this->app->singleton(DeviceIdentity::class);
     }
 
     public function boot(Router $router): void

@@ -1,0 +1,8 @@
+<script setup>
+import {Head,useForm} from '@inertiajs/vue3';
+import PortalLayout from '@/Layouts/PortalLayout.vue';
+import AdminNavigation from '@/Components/Admin/AdminNavigation.vue';
+const props=defineProps({settings:Object});
+const form=useForm({enabled:props.settings.enabled,currency:props.settings.currency,monthly_price:props.settings.monthly_price});
+</script>
+<template><Head title="Online implementation pricing"/><PortalLayout><template #navigation><AdminNavigation/></template><h1 class="text-3xl font-bold">Online implementation pricing</h1><form class="mt-6 max-w-2xl space-y-5 rounded-2xl bg-white p-6" @submit.prevent="form.put(route('admin.hosting.update'))"><p>The monthly price includes domain and VPS. Checkout bills it for the software subscription term. Updates apply to new orders; paid contracts and issued invoices keep their original rate.</p><label class="flex gap-2"><input type="checkbox" v-model="form.enabled"/>Offer online implementation</label><label class="block">Currency<select v-model="form.currency" class="mt-1 block w-full rounded-lg border-slate-300"><option v-for="currency in ['NGN','USD','GBP','EUR','GHS','KES','ZAR']" :key="currency">{{ currency }}</option></select></label><label class="block">Domain and VPS price per month<input type="number" min="0.01" max="999999999" step="0.01" v-model="form.monthly_price" class="mt-1 block w-full rounded-lg border-slate-300"/></label><p v-for="(error,key) in form.errors" :key="key" class="text-red-700">{{ error }}</p><p v-if="$page.props.flash.success" class="text-emerald-700">{{ $page.props.flash.success }}</p><button :disabled="form.processing" class="rounded-xl bg-cyan-700 px-5 py-3 font-bold text-white">Save pricing</button></form></PortalLayout></template>

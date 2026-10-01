@@ -8,22 +8,23 @@ use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use KernelBridge\LicensingClient\Exceptions\KernelBridgeApiException;
 use KernelBridge\LicensingClient\Exceptions\KernelBridgeUnavailableException;
+use KernelBridge\LicensingClient\Services\DeviceIdentity;
 
 final class KernelBridgeLicenseClient
 {
     public function activate(string $licenseKey, string $installationIdentifier, ?string $deviceName = null): array
     {
-        return $this->request('post', '/licenses/activate', array_filter(['license_key' => $licenseKey, 'device_id' => $installationIdentifier, 'device_name' => $deviceName]));
+        return $this->request('post', '/licenses/activate', array_filter(['license_key' => $licenseKey, 'device_id' => $installationIdentifier, 'device_name' => $deviceName, 'machine_fingerprint' => app(DeviceIdentity::class)->fingerprint(), 'device_info' => app(DeviceIdentity::class)->information()]));
     }
 
     public function verify(string $licenseKey, string $installationIdentifier): array
     {
-        return $this->request('post', '/licenses/verify', ['license_key' => $licenseKey, 'device_id' => $installationIdentifier]);
+        return $this->request('post', '/licenses/verify', ['license_key' => $licenseKey, 'device_id' => $installationIdentifier, 'machine_fingerprint' => app(DeviceIdentity::class)->fingerprint()]);
     }
 
     public function deactivate(string $licenseKey, string $installationIdentifier): array
     {
-        return $this->request('post', '/licenses/deactivate', ['license_key' => $licenseKey, 'device_id' => $installationIdentifier]);
+        return $this->request('post', '/licenses/deactivate', ['license_key' => $licenseKey, 'device_id' => $installationIdentifier, 'machine_fingerprint' => app(DeviceIdentity::class)->fingerprint()]);
     }
 
     public function getEntitlements(string $subscriptionIdentifier): array

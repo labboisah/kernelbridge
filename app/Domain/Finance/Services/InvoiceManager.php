@@ -3,7 +3,9 @@
 namespace App\Domain\Finance\Services;
 
 use App\Domain\Audit\Contracts\AuditRecorder;
+use App\Domain\Licensing\Services\PaidLicenseService;
 use App\Domain\Sales\Services\QuotationCalculator;
+use App\Models\Customer;
 use App\Models\Invoice;
 use App\Models\Plan;
 use App\Models\Product;
@@ -63,6 +65,7 @@ final readonly class InvoiceManager
     public function payment(Invoice $invoice, array $data, User $actor): void
     {
         DB::transaction(function () use ($invoice, $data, $actor) {
+            Customer::query()->lockForUpdate()->findOrFail($invoice->customer_id);
             $i = Invoice::query()->lockForUpdate()->findOrFail($invoice->id);
             if (! in_array($i->status->value, ['issued', 'partially_paid', 'overdue'], true)) {
                 throw ValidationException::withMessages(['status' => 'Payments can only be recorded against an issued invoice.']);
@@ -75,6 +78,7 @@ final readonly class InvoiceManager
             $remaining = $this->minor($i->total) - $paid;
             $status = $remaining === 0 ? 'paid' : 'partially_paid';
             $i->update(['amount_paid' => $this->format($paid), 'balance' => $this->format($remaining), 'status' => $status, 'paid_at' => $remaining === 0 ? now() : null, 'payment_reference' => $data['reference']]);
+            app(PaidLicenseService::class)->complete($i, $actor);
             $this->audit->record('invoice.payment_recorded', $actor, ['invoice_uuid' => $i->uuid, 'amount' => $this->format($amount), 'reference' => $data['reference']]);
         });
     }

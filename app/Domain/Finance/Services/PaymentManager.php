@@ -2,9 +2,14 @@
 
 namespace App\Domain\Finance\Services;
 
+use App\Domain\Licensing\Services\PaidLicenseService;
 use App\Enums\PaymentStatus;
+use App\Models\Customer;
+use App\Models\CustomerCreditEntry;
 use App\Models\Invoice;
 use App\Models\Payment;
+use App\Models\Subscription;
+use App\Models\SubscriptionPackageOrder;
 use App\Models\User;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
@@ -28,6 +33,7 @@ final readonly class PaymentManager
     public function verify(Payment $payment, array $allocations, User $actor): Payment
     {
         return DB::transaction(function () use ($payment, $allocations, $actor): Payment {
+            Customer::query()->lockForUpdate()->findOrFail($payment->customer_id);
             $payment = Payment::query()->lockForUpdate()->findOrFail($payment->id);
             if ($payment->status !== PaymentStatus::Pending) {
                 throw ValidationException::withMessages(['status' => 'Only pending payments can be verified.']);
@@ -53,6 +59,9 @@ final readonly class PaymentManager
                 throw ValidationException::withMessages(['allocations' => 'The full payment amount must be allocated before verification.']);
             }
             $payment->update(['status' => PaymentStatus::Verified, 'verified_by' => $actor->id, 'verified_at' => now()]);
+            foreach ($payment->allocations()->with('invoice')->get() as $allocation) {
+                app(PaidLicenseService::class)->complete($allocation->invoice, $actor);
+            }
             $this->audit->record('payment.verified', $payment, $actor, ['allocations' => $allocations]);
 
             return $payment->refresh();
@@ -62,6 +71,7 @@ final readonly class PaymentManager
     public function reject(Payment $payment, User $actor, ?string $notes): Payment
     {
         return DB::transaction(function () use ($payment, $actor, $notes): Payment {
+            Customer::query()->lockForUpdate()->findOrFail($payment->customer_id);
             $payment = Payment::query()->lockForUpdate()->findOrFail($payment->id);
             if ($payment->status !== PaymentStatus::Pending) {
                 throw ValidationException::withMessages(['status' => 'Only pending payments can be rejected.']);
@@ -76,13 +86,25 @@ final readonly class PaymentManager
     public function refund(Payment $payment, User $actor, string $reason): Payment
     {
         return DB::transaction(function () use ($payment, $actor, $reason): Payment {
+            Customer::query()->lockForUpdate()->findOrFail($payment->customer_id);
             $payment = Payment::query()->lockForUpdate()->with('allocations')->findOrFail($payment->id);
             if ($payment->status !== PaymentStatus::Verified || Payment::query()->where('parent_payment_id', $payment->id)->exists()) {
                 throw ValidationException::withMessages(['status' => 'Only an unreversed verified payment can be refunded.']);
             }
             foreach ($payment->allocations as $allocation) {
+                $order = SubscriptionPackageOrder::query()->where('invoice_id', $allocation->invoice_id)->first();
+                $subscriptionIds = Subscription::query()->where('invoice_id', $allocation->invoice_id)->pluck('id');
+                if ($order || CustomerCreditEntry::query()->whereIn('subscription_id', $subscriptionIds)->exists()
+                    || CustomerCreditEntry::query()->where('invoice_id', $allocation->invoice_id)->exists()) {
+                    throw ValidationException::withMessages(['payment' => 'This invoice has package adjustments or credit. Reconcile its credit ledger before a cash refund.']);
+                }
                 $invoice = Invoice::query()->lockForUpdate()->findOrFail($allocation->invoice_id);
                 $this->reverseInvoice($invoice, $this->minor($allocation->amount));
+                foreach (Subscription::query()->where('invoice_id', $invoice->id)->get() as $subscription) {
+                    if (data_get($subscription->metadata, 'selected_packages')) {
+                        $subscription->update(['status' => 'suspended']);
+                    }
+                }
             }
             $refund = Payment::query()->create(['customer_id' => $payment->customer_id, 'amount' => $payment->amount, 'currency' => $payment->currency, 'payment_method' => $payment->payment_method, 'transaction_reference' => 'REFUND-'.$payment->transaction_reference, 'payment_date' => today(), 'status' => PaymentStatus::Refunded, 'notes' => $reason, 'provider' => $payment->provider, 'recorded_by' => $actor->id, 'verified_by' => $actor->id, 'verified_at' => now(), 'parent_payment_id' => $payment->id]);
             $refund->forceFill(['payment_number' => sprintf('KBT-RFD-%s-%06d', now()->year, $refund->id)])->save();

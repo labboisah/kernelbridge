@@ -2,9 +2,13 @@
 
 namespace App\Http\Controllers\Customer;
 
+use App\Domain\Finance\Services\CustomerCreditService;
 use App\Domain\Finance\Services\InvoiceManager;
 use App\Domain\Finance\Services\PaymentManager;
 use App\Domain\Licensing\Services\LicenseService;
+use App\Domain\Licensing\Services\PackageCatalog;
+use App\Domain\Licensing\Services\PackageChangeService;
+use App\Domain\Licensing\Services\PackagePurchaseService;
 use App\Domain\Security\Contracts\FileScanner;
 use App\Domain\Subscriptions\Services\SubscriptionService;
 use App\Http\Controllers\Controller;
@@ -12,7 +16,9 @@ use App\Http\Requests\Customer\StorePaymentRequest;
 use App\Http\Requests\Customer\StoreServiceRequest;
 use App\Http\Requests\Customer\TransitionServiceRequest;
 use App\Http\Requests\Customer\UpdateServiceRequest;
+use App\Models\ClientSetupBundle;
 use App\Models\Customer;
+use App\Models\CustomerCreditEntry;
 use App\Models\Invoice;
 use App\Models\LicenseActivation;
 use App\Models\Payment;
@@ -63,6 +69,11 @@ final class PortalController extends Controller
         $customer = $this->primaryCustomer($request);
         $plan = Plan::query()->publiclyAvailable()->whereNotNull('price')->with('product')->where('uuid', $request->validated('plan_uuid'))
             ->whereHas('product', fn ($query) => $query->where('uuid', $request->validated('product_uuid')))->firstOrFail();
+        if ($plan->product->code === 'MEDIFLOW') {
+            $invoice = app(PackagePurchaseService::class)->purchase($customer, [$plan->uuid], $request->user());
+
+            return redirect()->route('portal.invoices.show', $invoice)->with('success', 'Invoice prepared. Complete payment to receive your activation code.');
+        }
         $duplicate = Subscription::query()->where('customer_id', $customer->id)->where('product_id', $plan->product_id)
             ->whereIn('status', ['pending', 'trial', 'active', 'grace', 'suspended'])->exists();
         if ($duplicate) {
@@ -72,7 +83,7 @@ final class PortalController extends Controller
             $invoice = $invoices->create([
                 'customer_id' => $customer->id, 'issue_date' => today(), 'due_date' => today()->addDays(7), 'currency' => $plan->currency,
                 'notes' => 'Automatically generated for a new '.$plan->product->name.' service.', 'terms' => 'Service activation occurs after full payment is verified.',
-                'items' => [['product_id' => $plan->product_id, 'plan_id' => $plan->id, 'description' => $plan->product->name.' — '.$plan->name.' plan', 'quantity' => 1, 'unit_price' => $plan->price, 'discount' => 0, 'tax' => 0]],
+                'items' => [['product_id' => $plan->product_id, 'plan_id' => $plan->id, 'description' => $plan->product->name.' â€” '.$plan->name.' plan', 'quantity' => 1, 'unit_price' => $plan->price, 'discount' => 0, 'tax' => 0]],
             ], $request->user());
 
             return [$service->create($customer, $plan, $invoice, $request->user(), ['auto_renew' => $request->boolean('auto_renew')]), $invoice];
@@ -129,15 +140,49 @@ final class PortalController extends Controller
         $licenses = SoftwareLicense::query()->whereIn('customer_id', $this->customerIds($request))
             ->with(['subscription.product:id,name,code', 'activations' => fn ($query) => $query->latest('activated_at')])->latest()->get();
 
-        return Inertia::render('Customer/Licenses/Index', ['licenses' => $licenses->map(fn (SoftwareLicense $license) => [
+        $packages = Plan::query()->publiclyAvailable()->whereIn('slug', array_keys(config('mediflow.packages')))
+            ->whereHas('product', fn ($q) => $q->published()->where('code', 'MEDIFLOW'))->get()
+            ->map(fn (Plan $plan) => app(PackageCatalog::class)->plan($plan));
+        $orders = Subscription::query()->whereIn('customer_id', $this->customerIds($request))
+            ->whereHas('product', fn ($q) => $q->where('code', 'MEDIFLOW'))->with('invoice')->latest()->get()
+            ->map(function (Subscription $s): array {
+                $pending = app(PackageChangeService::class)->pending($s)->with('invoice')->first();
+
+                return ['uuid' => $s->uuid, 'status' => $s->status->value,
+                    'packages' => data_get($s->metadata, 'package_names', []),
+                    'package_uuids' => array_column(data_get($s->metadata, 'package_prices', []), 'uuid'),
+                    'ends_at' => $s->ends_at?->toISOString(), 'currency' => $s->currency,
+                    'billing_cycle' => $s->billing_cycle->value,
+                    'can_change' => $s->status->value === 'active' && $s->ends_at?->isFuture() && ! $pending,
+                    'can_renew' => in_array($s->status->value, ['active', 'grace', 'expired'], true) && $s->ends_at?->isPast() && ! $pending,
+                    'configuration' => app(PackageCatalog::class)->configuration($s),
+                    'pending_order' => $pending ? ['uuid' => $pending->uuid, 'kind' => $pending->kind,
+                        'invoice_uuid' => $pending->invoice->uuid, 'balance' => $pending->invoice->balance,
+                        'can_cancel' => (float) $pending->invoice->amount_paid === 0.0] : null,
+                    'invoice' => $s->invoice ? ['uuid' => $s->invoice->uuid, 'number' => $s->invoice->invoice_number,
+                        'status' => $s->invoice->status->value, 'balance' => $s->invoice->balance, 'currency' => $s->invoice->currency] : null];
+            });
+        $credits = $request->user()->customers()->get()->flatMap(function ($customer) {
+            return CustomerCreditEntry::query()->where('customer_id', $customer->id)->distinct()->pluck('currency')
+                ->map(fn ($currency) => ['customer' => $customer->name, 'currency' => $currency,
+                    'balance' => CustomerCreditService::money(app(CustomerCreditService::class)->balance($customer->id, $currency))]);
+        })->values();
+        $creditHistory = CustomerCreditEntry::query()->whereIn('customer_id', $this->customerIds($request))->latest()->limit(30)->get()
+            ->map(fn ($entry) => $entry->only(['uuid', 'description', 'amount', 'currency', 'created_at']));
+
+        return Inertia::render('Customer/Licenses/Index', ['credits' => $credits, 'creditHistory' => $creditHistory, 'packages' => $packages, 'orders' => $orders, 'licenses' => $licenses->map(fn (SoftwareLicense $license) => [
             'uuid' => $license->uuid, 'identifier' => 'KBT-LIC-'.strtoupper(substr(str_replace('-', '', $license->uuid), 0, 12)),
             'license_key' => $service->key($license),
+            'packages' => data_get($license->subscription?->metadata, 'package_names', []),
+            'device_bound' => (bool) data_get($license->subscription?->metadata, 'device_bound', false),
             'status' => $license->status, 'product' => $license->subscription?->product?->name,
             'expires_at' => $license->expires_at?->toDateString(), 'max_activations' => $license->max_activations,
             'activations' => $license->activations->map(fn (LicenseActivation $activation) => [
                 'uuid' => $activation->uuid, 'device_name' => $activation->device_name ?: 'Unnamed installation',
                 'status' => $activation->status, 'activated_at' => $activation->activated_at?->toIso8601String(),
                 'last_verified_at' => $activation->last_verified_at?->toIso8601String(),
+                'ip_address' => $activation->ip_address,
+                'device_info' => data_get($activation->metadata, 'device_info', []),
             ]),
         ])]);
     }
@@ -170,7 +215,7 @@ final class PortalController extends Controller
         abort_unless($request->user()->customers()->whereKey($invoice->customer_id)->exists(), 403);
         $invoice->load(['customer', 'items', 'payments']);
 
-        return Inertia::render('Invoices/CustomerView', ['invoice' => $invoice, 'canPayOnline' => in_array($invoice->status->value, ['issued', 'partially_paid', 'overdue'], true) && (float) $invoice->balance > 0, 'portal' => true]);
+        return Inertia::render('Invoices/CustomerView', ['invoice' => $invoice, 'clientSetup' => ($paidSubscription = Subscription::where('invoice_id', $invoice->id)->whereHas('license')->first()) && ClientSetupBundle::where('subscription_id', $paidSubscription->id)->exists() && $invoice->status->value === 'paid' ? ['license_key' => app(LicenseService::class)->key($paidSubscription->license), 'download_url' => route('portal.services.environment', $paidSubscription)] : null, 'availableCredit' => CustomerCreditService::money(app(CustomerCreditService::class)->balance($invoice->customer_id, $invoice->currency)), 'canPayOnline' => filled(config('services.flutterwave.secret_key')) && in_array($invoice->status->value, ['issued', 'partially_paid', 'overdue'], true) && (float) $invoice->balance > 0, 'portal' => true]);
     }
 
     public function payments(Request $request): Response
@@ -275,5 +320,3 @@ final class PortalController extends Controller
             'auto_renew' => $item->auto_renew];
     }
 }
-
-

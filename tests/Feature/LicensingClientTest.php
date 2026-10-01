@@ -19,6 +19,7 @@ use KernelBridge\LicensingClient\Http\Middleware\LicenseMiddleware;
 use KernelBridge\LicensingClient\Http\Middleware\LimitMiddleware;
 use KernelBridge\LicensingClient\KernelBridgeLicenseClient;
 use KernelBridge\LicensingClient\Models\LicenseState;
+use KernelBridge\LicensingClient\Services\DeviceIdentity;
 use KernelBridge\LicensingClient\Services\LicenseActivationService;
 use KernelBridge\LicensingClient\Services\LicenseCacheService;
 use KernelBridge\LicensingClient\Services\LicenseVerificationService;
@@ -56,6 +57,10 @@ final class LicensingClientTest extends TestCase
             $migration->up();
         }
 
+        $this->mock(DeviceIdentity::class, function ($mock): void {
+            $mock->shouldReceive('fingerprint')->andReturn(str_repeat('a', 64));
+            $mock->shouldReceive('information')->andReturn(['hostname' => 'TEST-PC', 'os' => 'Test OS']);
+        });
         $client = new KernelBridgeLicenseClient;
         $this->cache = new LicenseCacheService;
         $this->activation = new LicenseActivationService($client, $this->cache);
@@ -81,6 +86,19 @@ final class LicensingClientTest extends TestCase
         $this->assertStringNotContainsString('finance', $raw->entitlement_payload);
         Http::assertSent(fn (Request $request): bool => $request->hasHeader('Authorization', 'Bearer machine-token')
             && $request->hasHeader('X-KernelBridge-Product', 'ALIGNEX'));
+    }
+
+    public function test_copied_database_cache_is_not_usable_on_another_computer(): void
+    {
+        $this->fakeSuccessfulApi();
+        $this->activation->activate('KBT-LIC-SECRET');
+        $this->assertTrue($this->cache->hasUsableLicense());
+        $this->mock(DeviceIdentity::class, function ($mock): void {
+            $mock->shouldReceive('fingerprint')->andReturn(str_repeat('b', 64));
+            $mock->shouldReceive('information')->andReturn(['hostname' => 'OTHER-PC']);
+        });
+        $this->assertFalse($this->cache->hasUsableLicense());
+        $this->assertSame('device_mismatch', $this->cache->activationRequirementReason());
     }
 
     public function test_recent_verification_uses_local_cache_without_an_api_request(): void
@@ -280,5 +298,3 @@ final class LicensingClientTest extends TestCase
         ]);
     }
 }
-
-

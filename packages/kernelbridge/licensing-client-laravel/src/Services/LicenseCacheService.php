@@ -34,11 +34,13 @@ final class LicenseCacheService
                 $grace = $expiresAt->copy();
             }
             $payload = [
-                'version' => 1,
+                'version' => 2,
+                'machine_fingerprint' => app(DeviceIdentity::class)->fingerprint(),
                 'product_code' => $state->product_code,
                 'license_identifier' => $license['license_uuid'],
                 'subscription_identifier' => $license['subscription_uuid'],
                 'subscription' => $subscription,
+                'configuration' => $license['configuration'] ?? $subscription['configuration'] ?? [],
                 'features' => collect($entitlements['entitlements'] ?? [])->mapWithKeys(fn (array $item): array => [(string) $item['key'] => ['enabled' => (bool) ($item['enabled'] ?? false), 'limit' => $item['limit'] ?? null]])->all(),
                 'verified_at' => $verifiedAt->toISOString(),
                 'offline_grace_expires_at' => $grace->toISOString(),
@@ -83,7 +85,8 @@ final class LicenseCacheService
                 && ($state->expires_at === null || $state->expires_at->isFuture())
                 && $state->offline_grace_expires_at?->isFuture()
                 && $this->configFingerprintIsValid($state)
-                && $this->signatureIsValid($state);
+                && $this->signatureIsValid($state)
+                && $this->machineMatches($state);
         } catch (Throwable) {
             return false;
         }
@@ -194,6 +197,9 @@ final class LicenseCacheService
             if (! $this->configFingerprintIsValid($state)) {
                 return 'configuration_tampered';
             }
+            if ($state->entitlement_payload && ! $this->machineMatches($state)) {
+                return 'device_mismatch';
+            }
             if (! $this->signatureIsValid($state)) {
                 return 'local_license_tampered';
             }
@@ -223,6 +229,7 @@ final class LicenseCacheService
     {
         return match ($this->activationRequirementReason()) {
             'activation_limit_reached' => 'This license has reached its device activation limit. Deactivate another installation in KernelBridge before trying again.',
+            'device_mismatch' => 'This cached licence does not belong to this computer. Connect to KernelBridge and activate this installation.',
             'configuration_tampered' => 'KernelBridge licensing configuration changed. Re-activation is required.',
             'configuration_incomplete' => 'KernelBridge licensing configuration is incomplete.',
             'license_deactivated' => 'This installation has been deactivated. Re-activation is required.',
@@ -233,6 +240,18 @@ final class LicenseCacheService
             'offline_grace_expired' => 'Offline grace has expired. Reconnect to KernelBridge and verify the license.',
             default => 'An active KernelBridge subscription is required.',
         };
+    }
+
+    public function machineMatches(?LicenseState $state = null): bool
+    {
+        try {
+            $state ??= $this->state();
+            $expected = $state->entitlement_payload['machine_fingerprint'] ?? null;
+
+            return is_string($expected) && hash_equals($expected, app(DeviceIdentity::class)->fingerprint());
+        } catch (Throwable) {
+            return false;
+        }
     }
 
     private function configFingerprint(): string

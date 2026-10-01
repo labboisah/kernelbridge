@@ -25,6 +25,7 @@ watch(() => form.product_uuid, () => { form.plan_uuid = ''; });
             <p class="mt-2 text-sm font-semibold text-cyan-800">Account: {{ customer.name }} · {{ customer.customer_number }}</p>
         </div>
 
+        <Link :href="route('portal.licenses.index')" class="mb-5 block rounded-xl bg-cyan-50 p-4 font-semibold text-cyan-800">Choose MediFlow packages and prepare a licence invoice</Link>
         <form class="form-card" @submit.prevent="form.post(route('portal.services.store'))">
             <div class="form-grid">
                 <label>

@@ -149,3 +149,47 @@ The shared licensing behavior is now defined in [Licensing client spec](docs/LIC
 
 
 
+
+
+## MediFlow package licensing
+
+/account/licenses supports Pharmacy, General Clinic, Diagnostic Center, Maternity Clinic, Hospital, Enterprise Hospital and Care Network (specialist, matching MediFlow's canonical key). The reviewed source is ../mediflow/config/mediflow_modules.php; Enterprise expands the known module list at purchase time. Purchased modules and package prices are snapshotted so subsequent catalogue edits do not change an issued order.
+
+Run the focused seeder on an existing platform:
+
+    php artisan db:seed --class=MediFlowPackageSeeder
+
+This adds missing package plans and features and preserves configured prices. Set actual prices, setup fees, currency and recurring billing period under **Administration > Products > MediFlow > Plans**. No software package prices were found in the reviewed MediFlow files. New packages therefore show **Contact sales** until priced; annual/NGN are initial editable catalogue defaults, not an approved price list. Legacy generic MediFlow plans are retained for existing records but excluded from public purchase listings.
+
+Customers select packages with the same currency and period. Checkout calculates line items from server-side prices and creates one pending subscription and an issued invoice. Full verified Flutterwave payment, finance-verified payment allocations, or a finance-recorded invoice payment activates the subscription and issues one code. Partial payment and submitted but unverified proof do not issue codes. Flutterwave still requires its deployment credentials and webhook configuration; automated tests fake the gateway and do not charge money. The invoice page supports print/PDF, payment proof and the issued activation code link.
+
+A package licence has one permanent installation binding. Activation stores a keyed machine fingerprint plus hostname, OS, architecture, client version, IP and timestamps in license_activations. Keys remain encrypted at rest. Activation limits are checked while holding a database row lock; sequential repeat activations are idempotent. Deactivation preserves the binding and cannot transfer the licence. Verification rejects a changed or omitted bound fingerprint. Refunds suspend the purchased subscription. Customers can review package additions and removals from the licensing page. Additions are prorated to the current period end, plus any setup fees, and unlock only after full settlement. Removals take effect immediately and credit the unused recurring time; setup fees are non-refundable. Account credits are currency-specific and can settle future invoices. A pending change must be settled or cancelled before another; partially paid changes cannot be cancelled. Late addition payments become credit instead of granting expired access. Renewal is offered at period expiry and uses the existing activation code. Adjusted invoices require finance reconciliation for refunds. The older single-plan change and renewal routes cannot bypass this workflow.
+
+### MediFlow client rollout
+
+The sibling MediFlow project includes the local Composer client, activation assets, CentralLicenseService, a public /license screen, guarded /installation/setup and EnsureCentralLicense. Apply the new platform credit migration and client onboarding migration in addition to SDK state migrations:
+
+    # KernelBridge
+    php artisan migrate --path=database/migrations/2026_10_01_000001_create_package_changes_and_customer_credits.php
+    # MediFlow
+    php artisan migrate --path=database/migrations/2026_10_01_000001_create_installation_onboarding.php
+
+    php artisan migrate --path=vendor/kernelbridge/licensing-client-laravel/database/migrations
+    php artisan vendor:publish --tag=kernelbridge-licensing-assets
+
+On the platform, use the following command to create a product machine credential and store it securely in the client environment; do not commit it:
+
+    php artisan api-client:issue MEDIFLOW
+
+In MediFlow configure KERNELBRIDGE_API_URL, KERNELBRIDGE_API_TOKEN and an independent KERNELBRIDGE_CACHE_SIGNING_KEY, then set APP_MODE=client and rebuild configuration cache. Client mode always enforces activation, even when MEDIFLOW_CENTRAL_LICENSING=false. Non-client modes retain the local behavior unless MEDIFLOW_CENTRAL_LICENSING=true. Once enabled, an unactivated installation redirects to /license. Activate with the paid code, then complete branding and the first administrator account at /installation/setup. A short-lived browser grant prevents another visitor from taking over initial setup; existing installations require their installation administrator to sign in. Completion opens the normal welcome page. Run the Laravel scheduler continuously. Purchased entitlements drive module access; local package edits cannot grant extra modules. Branding and staff permissions remain separate. Activation and verification return an atomic package/feature configuration with descriptions and a revision, stored in the signed device-bound cache. After package changes or payment, the administrator selects Refresh subscription on the installation page; scheduled verification also refreshes entitlements. This configures modules already shipped with MediFlow; it does not download or execute remote source code.
+
+The Laravel client hashes the Windows MachineGuid, Linux machine-id or macOS platform UUID; it sends no raw OS machine identifier. Its signed offline cache is also bound to that hash. Offline access is bounded by subscription expiry and 72-hour grace, and online rejection invalidates the cache. This detects ordinary copying of a database to a different OS installation; it is not hardware attestation and cannot defeat an administrator modifying the client or cloning/spoofing the OS identity. OS reinstalls or device replacement need support-assisted licence replacement. Existing caches must be refreshed online after this client update.
+
+Focused verification:
+
+    # KernelBridge
+    php artisan test --filter="MediFlowLicensingTest|LicensingClientTest|CustomerPortalTest|ProductIntegrationApiTest"
+    # MediFlow
+    php artisan test --filter="CentralLicensingTest|InstallationSetupTest"
+
+Concurrency protection uses row locks but the SQLite tests are not a production MySQL load test.

@@ -7,7 +7,7 @@ const groups = [
     { label: 'Sales & customers', links: [['leads','admin.leads.index','CRM Pipeline','admin.leads.*'],['customers','admin.customers.index','Customers','admin.customers.*'],['quotations','admin.quotations.index','Quotations','admin.quotations.*']] },
     { label: 'Finance', links: [['invoices','admin.invoices.index','Invoices','admin.invoices.*'],['payments','admin.payments.index','Payments','admin.payments.*']] },
     { label: 'Operations', links: [['support','admin.support.index','Support','admin.support.*'],['support-teams','admin.support-teams.index','Support Teams','admin.support-teams.*'],['demo-mode','admin.demo-mode.index','Demo Mode','admin.demo-mode.*'],['mcp','admin.mcp.index','MCP Operators','admin.mcp.*']] },
-    { label: 'Catalogue', links: [['products','admin.products.index','Products','admin.products.*'],['plans','admin.products.index','Plans & pricing','admin.plans.*']] },
+    { label: 'Catalogue', links: [['products','admin.products.index','Products','admin.products.*'],['plans','admin.products.index','Plans & pricing','admin.plans.*'],['hosting','admin.hosting.edit','Online implementation','admin.hosting.*']] },
 ];
 const isActive = (link) => props.active ? props.active === link[0] : route().current(link[3]);
 </script>

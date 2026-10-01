@@ -59,6 +59,9 @@ final class Plan extends Model
 
     public function scopePubliclyAvailable(Builder $query): Builder
     {
-        return $query->where('is_active', true)->where('is_public', true)->orderBy('sort_order');
+        return $query->where('is_active', true)->where('is_public', true)
+            ->where(fn (Builder $q) => $q->whereHas('product', fn (Builder $p) => $p->where('code', '!=', 'MEDIFLOW'))
+                ->orWhereIn('slug', array_keys(config('mediflow.packages', []))))
+            ->orderBy('sort_order');
     }
 }

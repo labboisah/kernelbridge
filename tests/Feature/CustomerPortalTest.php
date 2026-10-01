@@ -148,8 +148,8 @@ final class CustomerPortalTest extends TestCase
         $this->actingAs($user)->get(route('portal.services.create'))->assertOk()->assertInertia(fn (Assert $page) => $page
             ->component('Customer/Services/Create')
             ->where('customer.uuid', $customer->uuid)
-            ->has('products', 5)
-            ->has('plans', 10)
+            ->has('products', 4)
+            ->has('plans', 8)
             ->has('plans.0.features')
             ->missing('accounts'));
     }
@@ -243,5 +243,3 @@ final class CustomerPortalTest extends TestCase
         return Invoice::factory()->create(['customer_id' => $customer->id, 'invoice_number' => $number, 'status' => 'issued', 'total' => 1000, 'balance' => 1000, 'amount_paid' => 0, 'created_by' => $actor->id]);
     }
 }
-
-

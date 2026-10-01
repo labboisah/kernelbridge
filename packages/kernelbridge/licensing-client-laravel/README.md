@@ -251,3 +251,10 @@ php artisan test --filter=LicensingClientTest
 
 
 
+
+
+## Machine binding
+
+The client now sends machine_fingerprint with activation, verification and deactivation. It derives a SHA-256 value from the OS machine identity (Windows MachineGuid, Linux machine-id or macOS platform UUID). Activation also sends device_info containing hostname, OS, architecture and client version. If an OS identity cannot be read, licensing fails closed; there is no copyable random-ID fallback. The encrypted, signed version-2 cache includes this fingerprint and cannot be used unchanged on another machine. Existing version-1 caches require online refresh.
+
+The platform persists a keyed hash rather than the raw machine identifier. Device-bound MediFlow purchases retain their installation binding after deactivation. Other integrations keep their configured activation capacity, with the machine check enforced for activations that supplied a fingerprint. Browser-only clients cannot reliably supply OS identity; use the server-side Laravel client on the actual licensed host. Containers and cloned operating systems must have independently provisioned machine identities; this mechanism is not remote hardware attestation.

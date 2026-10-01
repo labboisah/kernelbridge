@@ -11,6 +11,13 @@ final class EntitlementService
     {
         $now = now();
         $subscription->entitlements()->whereNull('effective_until')->update(['effective_until' => $now]);
+        if (is_array($modules = data_get($subscription->metadata, 'licensed_modules'))) {
+            foreach ($modules as $module) {
+                $subscription->entitlements()->create(['feature_key' => $module, 'feature_name' => config('mediflow.modules.'.$module, $module), 'enabled' => true, 'limit_value' => null, 'source_plan_id' => $plan->id, 'effective_from' => $now]);
+            }
+
+            return;
+        }
         $features = $plan->features()->get()->keyBy('feature_key');
         foreach ($plan->limits()->get() as $limit) {
             $features->put($limit->limit_key, (object) ['feature_key' => $limit->limit_key, 'feature_name' => $limit->limit_name, 'enabled' => true, 'limit_value' => $limit->limit_value]);

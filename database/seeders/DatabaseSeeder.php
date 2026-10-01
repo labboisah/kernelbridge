@@ -16,6 +16,7 @@ class DatabaseSeeder extends Seeder
             ProductSeeder::class,
             DemoProfileSeeder::class,
             PlanSeeder::class,
+            MediFlowPackageSeeder::class,
             SupportTeamSeeder::class,
             SuperAdminSeeder::class,
         ]);

@@ -71,12 +71,15 @@ final readonly class SubscriptionService
     public function renew(Subscription $subscription, Invoice $invoice, User $actor): Subscription
     {
         return DB::transaction(function () use ($subscription, $invoice, $actor): Subscription {
+            if (array_key_exists('selected_packages', $subscription->metadata ?? [])) {
+                throw ValidationException::withMessages(['invoice_id' => 'Use the package renewal invoice flow for this subscription.']);
+            }
             if (! $this->matchesInvoice($subscription, $invoice)) {
                 throw ValidationException::withMessages(['invoice_id' => 'A matching paid renewal invoice is required.']);
             }
             $before = $this->state($subscription);
             $start = $subscription->ends_at && $subscription->ends_at->isFuture() ? $subscription->ends_at : now();
-            $subscription->update(['invoice_id' => $invoice->id, 'status' => SubscriptionStatus::Active, 'starts_at' => $start, 'ends_at' => $this->cycleEnd($start, $subscription->billing_cycle), 'grace_ends_at' => null, 'price' => $subscription->plan->price, 'currency' => $subscription->plan->currency, 'renewal_notice_sent_at' => null]);
+            $subscription->update(['invoice_id' => $invoice->id, 'status' => SubscriptionStatus::Active, 'starts_at' => $start, 'ends_at' => $this->cycleEnd($start, $subscription->billing_cycle), 'grace_ends_at' => null, 'price' => data_get($subscription->metadata, 'selected_packages') ? $subscription->price : $subscription->plan->price, 'currency' => $subscription->plan->currency, 'renewal_notice_sent_at' => null]);
             $this->entitlements->snapshot($subscription, $subscription->plan);
             $this->change($subscription, 'renewed', $subscription->plan, $subscription->plan, $actor, $before, 'Paid renewal');
 
@@ -89,6 +92,9 @@ final readonly class SubscriptionService
         return DB::transaction(function () use ($subscription, $newPlan, $actor, $effectiveAt): array {
             $subscription = Subscription::query()->lockForUpdate()->findOrFail($subscription->id);
             $effectiveAt ??= now();
+            if (array_key_exists('selected_packages', $subscription->metadata ?? [])) {
+                throw ValidationException::withMessages(['plan_id' => 'Package licences require a separately invoiced package change. Contact support.']);
+            }
             if ($subscription->status !== SubscriptionStatus::Active || $newPlan->product_id !== $subscription->product_id || ! $newPlan->is_active) {
                 throw ValidationException::withMessages(['plan_id' => 'An active plan for the same product is required.']);
             }
@@ -179,7 +185,8 @@ final readonly class SubscriptionService
 
     private function matchesInvoice(Subscription $subscription, Invoice $invoice): bool
     {
-        return $invoice->status === InvoiceStatus::Paid
+        return (! data_get($subscription->metadata, 'selected_packages') || $subscription->invoice_id === $invoice->id)
+            && $invoice->status === InvoiceStatus::Paid
             && $invoice->customer_id === $subscription->customer_id
             && $invoice->currency === $subscription->currency
             && $invoice->items()->where('product_id', $subscription->product_id)->exists();

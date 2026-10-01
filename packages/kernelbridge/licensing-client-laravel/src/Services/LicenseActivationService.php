@@ -13,8 +13,8 @@ final readonly class LicenseActivationService
     {
         $installation = $this->cache->state()->installation_identifier;
         $license = $this->client->activate($licenseKey, $installation, $deviceName ?? config('app.name'));
-        $subscription = $this->client->getSubscription($license['subscription_uuid']);
-        $entitlements = $this->client->getEntitlements($license['subscription_uuid']);
+        $subscription = $license['subscription'] ?? $this->client->getSubscription($license['subscription_uuid']);
+        $entitlements = $license['entitlements'] ?? $this->client->getEntitlements($license['subscription_uuid']);
 
         return $this->cache->storeVerified($licenseKey, $license, $subscription, $entitlements);
     }

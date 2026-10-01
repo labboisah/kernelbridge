@@ -5,6 +5,7 @@ use App\Http\Controllers\Admin\AccessControlController as AdminAccessControlCont
 use App\Http\Controllers\Admin\CustomerController as AdminCustomerController;
 use App\Http\Controllers\Admin\DashboardController as AdminDashboardController;
 use App\Http\Controllers\Admin\DemoModeController as AdminDemoModeController;
+use App\Http\Controllers\Admin\HostingSettingsController;
 use App\Http\Controllers\Admin\InvoiceController as AdminInvoiceController;
 use App\Http\Controllers\Admin\LeadController as AdminLeadController;
 use App\Http\Controllers\Admin\McpController as AdminMcpController;
@@ -15,7 +16,9 @@ use App\Http\Controllers\Admin\QuotationController as AdminQuotationController;
 use App\Http\Controllers\Admin\StaffController as AdminStaffController;
 use App\Http\Controllers\Admin\SupportTeamController as AdminSupportTeamController;
 use App\Http\Controllers\Admin\SupportTicketController as AdminSupportTicketController;
+use App\Http\Controllers\Customer\CheckoutController;
 use App\Http\Controllers\Customer\DashboardController as CustomerDashboardController;
+use App\Http\Controllers\Customer\LicensePurchaseController;
 use App\Http\Controllers\Customer\PortalController as CustomerPortalController;
 use App\Http\Controllers\Customer\SupportTicketController as CustomerSupportTicketController;
 use App\Http\Controllers\CustomerInvoiceController;
@@ -63,6 +66,9 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
     Route::get('/dashboard', CustomerDashboardController::class)->name('dashboard');
     Route::get('/staff', StaffDashboardController::class)->middleware('role:sales|finance|support')->name('staff.dashboard');
     Route::prefix('account')->name('portal.')->group(function (): void {
+        Route::get('/checkout', [CheckoutController::class, 'show'])->name('checkout.show');
+        Route::post('/checkout', [CheckoutController::class, 'store'])->middleware('throttle:10,1')->name('checkout.store');
+        Route::get('/services/{subscription:uuid}/environment', [CheckoutController::class, 'environment'])->name('services.environment');
         Route::get('/services', [CustomerPortalController::class, 'services'])->name('services.index');
         Route::get('/services/create', [CustomerPortalController::class, 'createService'])->name('services.create');
         Route::post('/services', [CustomerPortalController::class, 'storeService'])->name('services.store');
@@ -70,6 +76,12 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
         Route::put('/services/{subscription:uuid}', [CustomerPortalController::class, 'updateService'])->name('services.update');
         Route::post('/services/{subscription:uuid}/suspend', [CustomerPortalController::class, 'suspendService'])->name('services.suspend');
         Route::delete('/services/{subscription:uuid}', [CustomerPortalController::class, 'destroyService'])->name('services.destroy');
+        Route::post('/licenses/{subscription:uuid}/preview', [LicensePurchaseController::class, 'preview'])->name('licenses.preview');
+        Route::post('/licenses/{subscription:uuid}/packages', [LicensePurchaseController::class, 'change'])->name('licenses.change');
+        Route::post('/licenses/{subscription:uuid}/renew', [LicensePurchaseController::class, 'renew'])->name('licenses.renew');
+        Route::post('/package-orders/{order:uuid}/cancel', [LicensePurchaseController::class, 'cancel'])->name('licenses.cancel-order');
+        Route::post('/invoices/{invoice:uuid}/credit', [LicensePurchaseController::class, 'credit'])->name('invoices.credit');
+        Route::post('/licenses/purchase', [LicensePurchaseController::class, 'store'])->middleware('throttle:10,1')->name('licenses.purchase');
         Route::get('/licenses', [CustomerPortalController::class, 'licenses'])->name('licenses.index');
         Route::post('/license-activations/{activation:uuid}/deactivate', [CustomerPortalController::class, 'deactivate'])->name('licenses.activations.deactivate');
         Route::get('/invoices', [CustomerPortalController::class, 'invoices'])->name('invoices.index');
@@ -86,6 +98,8 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
     Route::post('/support/{ticket:uuid}/messages', [CustomerSupportTicketController::class, 'message'])->name('support.messages.store');
     Route::get('/support-attachments/{attachment:uuid}', SupportAttachmentController::class)->name('support.attachments.show');
     Route::prefix('admin')->name('admin.')->middleware(['role:'.implode('|', UserRole::administrative()), 'throttle:120,1'])->group(function (): void {
+        Route::get('/hosting', [HostingSettingsController::class, 'edit'])->middleware('role:super_admin|admin')->name('hosting.edit');
+        Route::put('/hosting', [HostingSettingsController::class, 'update'])->middleware('role:super_admin|admin')->name('hosting.update');
         Route::get('/', AdminDashboardController::class)->middleware('role:super_admin|admin')->name('dashboard');
         Route::resource('staff', AdminStaffController::class)->only(['index', 'store', 'update'])->scoped(['staff' => 'public_id']);
         Route::get('/access-control', [AdminAccessControlController::class, 'index'])->name('access-control.index');
@@ -140,8 +154,3 @@ Route::middleware('auth')->group(function () {
 });
 
 require __DIR__.'/auth.php';
-
-
-
-
-

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Domain\Licensing\Services\LicenseService;
+use App\Domain\Licensing\Services\PackageCatalog;
 use App\Http\Controllers\Controller;
 use App\Models\Subscription;
 use App\Support\ApiResponse;
@@ -47,7 +48,7 @@ final class ProductIntegrationController extends Controller
         $data = $request->validate(['subscription_uuid' => ['required', 'uuid']]);
         $subscription = $this->subscriptionForClient($request, $data['subscription_uuid']);
 
-        return ApiResponse::success($request, ['uuid' => $subscription->uuid, 'subscription_number' => $subscription->subscription_number, 'status' => $subscription->status->value, 'product_code' => $subscription->product->code, 'plan' => ['uuid' => $subscription->plan->uuid, 'name' => $subscription->plan->name], 'starts_at' => $subscription->starts_at?->toISOString(), 'ends_at' => $subscription->ends_at?->toISOString(), 'trial_ends_at' => $subscription->trial_ends_at?->toISOString(), 'grace_ends_at' => $subscription->grace_ends_at?->toISOString(), 'auto_renew' => $subscription->auto_renew]);
+        return ApiResponse::success($request, ['uuid' => $subscription->uuid, 'subscription_number' => $subscription->subscription_number, 'status' => $subscription->status->value, 'product_code' => $subscription->product->code, 'plan' => ['uuid' => $subscription->plan->uuid, 'name' => $subscription->plan->name], 'starts_at' => $subscription->starts_at?->toISOString(), 'ends_at' => $subscription->ends_at?->toISOString(), 'trial_ends_at' => $subscription->trial_ends_at?->toISOString(), 'grace_ends_at' => $subscription->grace_ends_at?->toISOString(), 'configuration' => app(PackageCatalog::class)->configuration($subscription), 'auto_renew' => $subscription->auto_renew, 'selected_packages' => data_get($subscription->metadata, 'selected_packages', []), 'primary_package' => data_get($subscription->metadata, 'primary_package')]);
     }
 
     public function entitlements(Request $request): JsonResponse
@@ -76,7 +77,12 @@ final class ProductIntegrationController extends Controller
     private function licenseData(Request $request, bool $name = false): array
     {
         $rules = ['license_key' => ['required', 'string', 'max:255'], 'device_id' => ['required', 'string', 'max:255']];
+        $rules['machine_fingerprint'] = ['nullable', 'string', 'regex:/^[a-f0-9]{64}$/'];
         if ($name) {
+            $rules['device_info'] = ['nullable', 'array:hostname,os,architecture,client_version'];
+            foreach (['hostname', 'os', 'architecture', 'client_version'] as $field) {
+                $rules['device_info.'.$field] = ['nullable', 'string', 'max:255'];
+            }
             $rules['device_name'] = ['nullable', 'string', 'max:255'];
         }
 
@@ -87,6 +93,6 @@ final class ProductIntegrationController extends Controller
     {
         $client = $request->attributes->get('api_client');
 
-        return Subscription::query()->with(['product', 'plan'])->where('uuid', $uuid)->where('product_id', $client->product_id)->firstOrFail();
+        return Subscription::query()->with(['product', 'plan'])->where('uuid', $uuid)->where('product_id', $client->product_id)->when($client->subscription_id, fn ($q) => $q->whereKey($client->subscription_id))->firstOrFail();
     }
 }

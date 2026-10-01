@@ -23,8 +23,8 @@ final readonly class LicenseVerificationService
 
         try {
             $license = $this->client->verify($state->encrypted_license_key, $state->installation_identifier);
-            $subscription = $this->client->getSubscription($license['subscription_uuid']);
-            $entitlements = $this->client->getEntitlements($license['subscription_uuid']);
+            $subscription = $license['subscription'] ?? $this->client->getSubscription($license['subscription_uuid']);
+            $entitlements = $license['entitlements'] ?? $this->client->getEntitlements($license['subscription_uuid']);
 
             return $this->cache->storeVerified($state->encrypted_license_key, $license, $subscription, $entitlements);
         } catch (KernelBridgeUnavailableException $exception) {
