@@ -25,23 +25,31 @@ final class LicenseController extends Controller
         ]);
     }
 
-    public function activate(Request $request, LicenseActivationService $activation): RedirectResponse
+    public function activate(Request $request, LicenseActivationService $activation, LicenseCacheService $cache): RedirectResponse
     {
+        $isEdunexa = strtoupper((string) config('kernelbridge-licensing.product_code')) === 'EDUNEXA';
         $data = $request->validate([
             'license_key' => ['required', 'string', 'max:255'],
-            'device_name' => ['nullable', 'string', 'max:255'],
+            'device_name' => [$isEdunexa ? 'required' : 'nullable', 'string', 'max:255'],
+            'platform_url' => [$isEdunexa ? 'required' : 'nullable', 'url', 'max:2048'],
         ]);
+        $state = $cache->state();
+        $wasPreviouslyActivated = $state->license_identifier !== null || $state->activation_identifier !== null;
 
         try {
-            $activation->activate($data['license_key'], $data['device_name'] ?? config('app.name'));
+            $activation->activate($data['license_key'], $data['device_name'] ?? config('app.name'), $data['platform_url'] ?? null);
         } catch (KernelBridgeApiException|KernelBridgeUnavailableException $exception) {
             return back()->withInput($request->except('license_key'))->withErrors([
                 'license_key' => $this->friendlyError($exception),
             ]);
         }
 
-        return redirect()->intended((string) config('kernelbridge-licensing.redirects.after_activation', '/'))
-            ->with('kernelbridge_license_status', 'License activated successfully.');
+        $redirect = (string) config('kernelbridge-licensing.redirects.after_activation', '/');
+        $response = ! $wasPreviouslyActivated && $redirect !== '/'
+            ? redirect($redirect)
+            : redirect()->intended('/');
+
+        return $response->with('kernelbridge_license_status', 'License activated successfully.');
     }
 
     public function verify(LicenseVerificationService $verification): RedirectResponse

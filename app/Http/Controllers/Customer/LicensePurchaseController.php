@@ -28,7 +28,21 @@ final class LicensePurchaseController extends Controller
         return redirect()->route('portal.invoices.show', $invoice)->with('success', 'Invoice prepared. Complete payment to receive your activation code.');
     }
 
-    public function preview(Request $request, Subscription $subscription, PackageChangeService $changes): JsonResponse
+
+    public function purchaseEdunexa(Request $request, \App\Domain\Licensing\Services\EdunexaModulePurchaseService $purchases): RedirectResponse
+    {
+        $data = $request->validate([
+            'plan_uuid' => ['required', 'uuid'],
+            'use_credit' => ['required', 'boolean'],
+        ]);
+        $customer = $request->user()->customers()->orderByDesc('customer_user.is_primary')->orderBy('customers.id')->firstOrFail();
+        $invoice = $purchases->purchase($customer, $data['plan_uuid'], $request->user());
+        if ($request->boolean('use_credit')) {
+            app(CustomerCreditService::class)->apply($invoice, $request->user());
+        }
+
+        return redirect()->route('portal.invoices.show', $invoice)->with('success', 'EduNexa plan invoice prepared. Complete payment to receive the activation code and private client settings.');
+    }    public function preview(Request $request, Subscription $subscription, PackageChangeService $changes): JsonResponse
     {
         $this->owned($request, $subscription->customer_id);
         $data = $request->validate(['packages' => ['present', 'array', 'max:7'], 'packages.*' => ['uuid', 'distinct'], 'renew' => ['sometimes', 'boolean']]);

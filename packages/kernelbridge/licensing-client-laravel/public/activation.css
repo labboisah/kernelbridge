@@ -302,6 +302,77 @@ body {
     margin: 0;
 }
 
+.kb-page--mediflow {
+    --kb-ink: #173538;
+    --kb-muted: #647b78;
+    --kb-line: #d6e5df;
+    --kb-cyan: #087f72;
+    --kb-green: #16775f;
+    background: #f1f7f4;
+}
+
+.kb-page--mediflow .kb-brand {
+    background-color: #103a37;
+    background-image: repeating-linear-gradient(135deg, transparent 0 34px, rgba(188, 226, 208, .045) 35px 36px);
+    color: #effaf5;
+}
+
+.kb-page--mediflow .kb-wordmark {
+    font-size: 21px;
+}
+
+.kb-page--mediflow .kb-wordmark small {
+    color: #a9cfc1;
+}
+
+.kb-page--mediflow .kb-eyebrow {
+    color: #8ee0c0;
+}
+
+.kb-page--mediflow .kb-brand-copy p {
+    color: #cee2d9;
+}
+
+.kb-page--mediflow .kb-check {
+    background: #16775f;
+}
+
+.kb-page--mediflow .kb-panel-header {
+    background: #f8fcfa;
+}
+
+.kb-page--mediflow .kb-button {
+    background: #087f72;
+}
+
+.kb-page--mediflow .kb-button:hover {
+    background: #06685e;
+}
+
+.kb-page--mediflow .kb-button-secondary {
+    background: #315a54;
+}
+
+.kb-page--mediflow .kb-button-secondary:hover {
+    background: #244641;
+}
+
+.kb-page--mediflow .kb-field input:focus {
+    border-color: #087f72;
+    box-shadow: 0 0 0 4px rgba(8, 127, 114, .14);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    .kb-page--mediflow .kb-panel {
+        animation: mediflow-panel-enter .45s ease-out both;
+    }
+
+    @keyframes mediflow-panel-enter {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+}
+
 @media (max-width: 900px) {
     .kb-page {
         grid-template-columns: 1fr;

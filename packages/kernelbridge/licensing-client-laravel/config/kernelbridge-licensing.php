@@ -28,11 +28,21 @@ return [
     'ui' => [
         'view' => env('KERNELBRIDGE_LICENSE_VIEW', 'kernelbridge-licensing::activation'),
         'logo_path' => env('KERNELBRIDGE_LICENSE_LOGO_PATH', 'vendor/kernelbridge-licensing/kernelbridge-logo.png'),
+        'logo_alt' => env('KERNELBRIDGE_LICENSE_LOGO_ALT'),
         'css_path' => env('KERNELBRIDGE_LICENSE_CSS_PATH', 'vendor/kernelbridge-licensing/activation.css'),
+        'show_logo' => (bool) env('KERNELBRIDGE_LICENSE_SHOW_LOGO', true),
+        'brand_name' => env('KERNELBRIDGE_LICENSE_BRAND_NAME'),
+        'brand_subtitle' => env('KERNELBRIDGE_LICENSE_BRAND_SUBTITLE'),
+        'heading' => env('KERNELBRIDGE_LICENSE_HEADING'),
+        'description' => env('KERNELBRIDGE_LICENSE_DESCRIPTION'),
     ],
 
     'redirects' => [
         'activation_route' => env('KERNELBRIDGE_LICENSE_ACTIVATION_ROUTE'),
-        'after_activation' => env('KERNELBRIDGE_LICENSE_REDIRECT_AFTER_ACTIVATION', '/'),
+        'after_activation' => env('KERNELBRIDGE_LICENSE_REDIRECT_AFTER_ACTIVATION', function () {
+            $product = strtoupper((string) env('KERNELBRIDGE_PRODUCT_CODE'));
+
+            return in_array($product, ['EDUNEXA', 'MEDIFLOW'], true) ? '/configuration' : '/';
+        }),
     ],
 ];

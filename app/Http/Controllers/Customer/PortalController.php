@@ -140,6 +140,40 @@ final class PortalController extends Controller
         $licenses = SoftwareLicense::query()->whereIn('customer_id', $this->customerIds($request))
             ->with(['subscription.product:id,name,code', 'activations' => fn ($query) => $query->latest('activated_at')])->latest()->get();
 
+        $edunexaPlans = Plan::query()->publiclyAvailable()->with('features')
+            ->whereHas('product', fn ($q) => $q->where('code', 'EDUNEXA'))
+            ->whereIn('slug', ['basic', 'professional', 'enterprise'])->orderBy('sort_order')->get()
+            ->map(function (Plan $plan): array {
+                $planFeatures = $plan->features->keyBy('feature_key');
+                $modules = collect(config('edunexa.modules', []))->filter(function (array $module) use ($planFeatures): bool {
+                    $key = 'module_'.\Illuminate\Support\Str::snake($module['key']);
+                    return (bool) $planFeatures->get($key)?->enabled;
+                })->map(function (array $module) use ($planFeatures): array {
+                    return [
+                        'code' => $module['key'], 'name' => $module['name'], 'description' => $module['description'],
+                        'features' => collect($module['features'])->map(function (array $feature) use ($module, $planFeatures): array {
+                            $key = \Illuminate\Support\Str::snake($module['key'].'_'.$feature['name']);
+                            return ['key' => $key, 'name' => $feature['name'], 'description' => $feature['description'],
+                                'enabled' => (bool) $planFeatures->get($key)?->enabled, 'ready' => $feature['status'] === 'ready'];
+                        })->values(),
+                    ];
+                })->values();
+
+                return ['uuid' => $plan->uuid, 'slug' => $plan->slug, 'name' => $plan->name,
+                    'description' => $plan->description, 'price' => $plan->price, 'setup_fee' => $plan->setup_fee,
+                    'currency' => $plan->currency, 'billing_cycle' => $plan->billing_cycle->value,
+                    'purchasable' => $plan->price !== null && (float) $plan->price > 0,
+                    'modules' => $modules];
+            });
+        $edunexaOrder = Subscription::query()->whereIn('customer_id', $this->customerIds($request))
+            ->whereHas('product', fn ($q) => $q->where('code', 'EDUNEXA'))
+            ->with('invoice')->latest()->first();
+        $edunexaOrder = $edunexaOrder ? [
+            'uuid' => $edunexaOrder->uuid, 'status' => $edunexaOrder->status->value,
+            'modules' => data_get($edunexaOrder->metadata, 'package_names', []),
+            'invoice' => $edunexaOrder->invoice ? ['uuid' => $edunexaOrder->invoice->uuid, 'number' => $edunexaOrder->invoice->invoice_number,
+                'status' => $edunexaOrder->invoice->status->value, 'balance' => $edunexaOrder->invoice->balance, 'currency' => $edunexaOrder->invoice->currency] : null,
+        ] : null;
         $packages = Plan::query()->publiclyAvailable()->whereIn('slug', array_keys(config('mediflow.packages')))
             ->whereHas('product', fn ($q) => $q->published()->where('code', 'MEDIFLOW'))->get()
             ->map(fn (Plan $plan) => app(PackageCatalog::class)->plan($plan));
@@ -170,11 +204,12 @@ final class PortalController extends Controller
         $creditHistory = CustomerCreditEntry::query()->whereIn('customer_id', $this->customerIds($request))->latest()->limit(30)->get()
             ->map(fn ($entry) => $entry->only(['uuid', 'description', 'amount', 'currency', 'created_at']));
 
-        return Inertia::render('Customer/Licenses/Index', ['credits' => $credits, 'creditHistory' => $creditHistory, 'packages' => $packages, 'orders' => $orders, 'licenses' => $licenses->map(fn (SoftwareLicense $license) => [
+        return Inertia::render('Customer/Licenses/Index', ['credits' => $credits, 'creditHistory' => $creditHistory, 'packages' => $packages, 'orders' => $orders, 'edunexaPlans' => $edunexaPlans, 'edunexaOrder' => $edunexaOrder, 'vatRate' => \App\Models\BillingSetting::vatRate(), 'licenses' => $licenses->map(fn (SoftwareLicense $license) => [
             'uuid' => $license->uuid, 'identifier' => 'KBT-LIC-'.strtoupper(substr(str_replace('-', '', $license->uuid), 0, 12)),
             'license_key' => $service->key($license),
             'packages' => data_get($license->subscription?->metadata, 'package_names', []),
             'device_bound' => (bool) data_get($license->subscription?->metadata, 'device_bound', false),
+            'setup_url' => $license->subscription && ClientSetupBundle::where('subscription_id', $license->subscription->id)->exists() ? route('portal.services.environment', $license->subscription) : null,
             'status' => $license->status, 'product' => $license->subscription?->product?->name,
             'expires_at' => $license->expires_at?->toDateString(), 'max_activations' => $license->max_activations,
             'activations' => $license->activations->map(fn (LicenseActivation $activation) => [

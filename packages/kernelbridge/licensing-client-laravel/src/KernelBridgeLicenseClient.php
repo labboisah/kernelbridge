@@ -5,6 +5,7 @@ namespace KernelBridge\LicensingClient;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Http;
 use KernelBridge\LicensingClient\Exceptions\KernelBridgeApiException;
 use KernelBridge\LicensingClient\Exceptions\KernelBridgeUnavailableException;
@@ -12,9 +13,14 @@ use KernelBridge\LicensingClient\Services\DeviceIdentity;
 
 final class KernelBridgeLicenseClient
 {
-    public function activate(string $licenseKey, string $installationIdentifier, ?string $deviceName = null): array
+    public function activate(string $licenseKey, string $installationIdentifier, ?string $deviceName = null, ?string $platformUrl = null): array
     {
-        return $this->request('post', '/licenses/activate', array_filter(['license_key' => $licenseKey, 'device_id' => $installationIdentifier, 'device_name' => $deviceName, 'machine_fingerprint' => app(DeviceIdentity::class)->fingerprint(), 'device_info' => app(DeviceIdentity::class)->information()]));
+        $deviceInfo = app(DeviceIdentity::class)->information();
+        if ($platformUrl !== null) {
+            $deviceInfo['platform_url'] = $platformUrl;
+        }
+
+        return $this->request('post', '/licenses/activate', array_filter(['license_key' => $licenseKey, 'device_id' => $installationIdentifier, 'device_name' => $deviceName, 'machine_fingerprint' => app(DeviceIdentity::class)->fingerprint(), 'device_info' => $deviceInfo]));
     }
 
     public function verify(string $licenseKey, string $installationIdentifier): array
@@ -44,6 +50,11 @@ final class KernelBridgeLicenseClient
                 ? $this->http()->get($path, $data)
                 : $this->http()->send(strtoupper($method), $path, ['json' => $data]);
         } catch (ConnectionException $exception) {
+            Log::warning('KernelBridge licensing connection failed', [
+                'host' => parse_url((string) config('kernelbridge-licensing.api_url'), PHP_URL_HOST),
+                'path' => $path,
+                'exception' => $exception->getMessage(),
+            ]);
             throw new KernelBridgeUnavailableException('KernelBridge licensing is temporarily unavailable.', previous: $exception);
         }
 
@@ -67,7 +78,14 @@ final class KernelBridgeLicenseClient
 
     private function data(Response $response): array
     {
+        
         if ($response->serverError()) {
+            Log::warning('KernelBridge licensing endpoint returned a server error', [
+                'host' => parse_url((string) config('kernelbridge-licensing.api_url'), PHP_URL_HOST),
+                'path' => $response->effectiveUri()->getPath(),
+                'status' => $response->status(),
+                'request_id' => $response->header('X-Request-ID'),
+            ]);
             throw new KernelBridgeUnavailableException('KernelBridge licensing is temporarily unavailable.');
         }
         if (! $response->successful() || $response->json('success') !== true || ! is_array($response->json('data'))) {

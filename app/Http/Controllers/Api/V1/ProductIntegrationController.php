@@ -79,10 +79,11 @@ final class ProductIntegrationController extends Controller
         $rules = ['license_key' => ['required', 'string', 'max:255'], 'device_id' => ['required', 'string', 'max:255']];
         $rules['machine_fingerprint'] = ['nullable', 'string', 'regex:/^[a-f0-9]{64}$/'];
         if ($name) {
-            $rules['device_info'] = ['nullable', 'array:hostname,os,architecture,client_version'];
+            $rules['device_info'] = ['nullable', 'array:hostname,os,architecture,client_version,platform_url'];
             foreach (['hostname', 'os', 'architecture', 'client_version'] as $field) {
                 $rules['device_info.'.$field] = ['nullable', 'string', 'max:255'];
             }
+            $rules['device_info.platform_url'] = ['nullable', 'url', 'max:2048'];
             $rules['device_name'] = ['nullable', 'string', 'max:255'];
         }
 

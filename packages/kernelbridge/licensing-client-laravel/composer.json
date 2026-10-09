@@ -1,6 +1,6 @@
 {
     "name": "kernelbridge/licensing-client-laravel",
-    "version": "1.0.0",
+    "version": "1.2.0",
     "description": "Reusable Laravel client for KernelBridge licensing, subscriptions and entitlements.",
     "type": "library",
     "license": "proprietary",

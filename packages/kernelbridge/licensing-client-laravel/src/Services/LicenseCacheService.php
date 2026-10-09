@@ -75,6 +75,12 @@ final class LicenseCacheService
         $this->state()->update(['status' => 'deactivated', 'offline_grace_expires_at' => now(), 'last_error_code' => null]);
     }
 
+    public function reset(): void
+    {
+        $state = $this->state();
+        $state->delete();
+    }
+
     public function hasUsableLicense(): bool
     {
         try {

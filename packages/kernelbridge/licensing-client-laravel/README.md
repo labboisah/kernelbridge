@@ -4,7 +4,18 @@ This package is the reusable licensing boundary for AlignEx, EduNexa, MediFlow, 
 
 ## Installation
 
-This is a private package and is not available from Packagist. Composer must first be told where to find it.
+This package is hosted in the public GitHub repository `labboisah/laravel-licensing-package`. It is not listed on Packagist, so configure the VCS repository in each client application before requiring it.
+
+### Install from GitHub
+
+Add the repository and require the stable package release from the client application's directory:
+
+```bash
+composer config repositories.kernelbridge vcs https://github.com/labboisah/laravel-licensing-package.git
+composer require kernelbridge/licensing-client-laravel:^1.2
+```
+
+The repository root contains this package's `composer.json`; no sibling KernelBridge checkout is needed. Commit both `composer.json` and `composer.lock` in the client app so other machines install the same release with `composer install`.
 
 ### Local sibling application
 
@@ -49,15 +60,26 @@ php artisan migrate
 
 The package auto-registers a minimal activation controller, routes, middleware aliases, Blade UI, and opt-in global request protection. Visit `/license` in the product app to activate, verify, or deactivate the local installation. Add KERNELBRIDGE_PROTECT_WEB_ROUTES=true to protect client app pages until activation succeeds.
 
-### Private Composer repository
+### Composer release tags
 
-For production deployments, publish and tag this package as `1.0.0` in the private KernelBridge Composer/VCS repository, configure that repository in each product, and run:
+Tag releases in this repository using the package version, for example `1.2.0`. Client applications can then require compatible stable updates with:
 
 ```bash
-composer require kernelbridge/licensing-client-laravel:^1.0
+composer update kernelbridge/licensing-client-laravel
 ```
 
-Do not use `minimum-stability: dev` as a workaround. The package now declares a stable `1.0.0` version for path-repository installations.
+Do not use `minimum-stability: dev` as a workaround. Stable release tags are available from GitHub VCS.
+
+### Updating an existing client
+
+After publishing a new package version, update the client application from its project directory:
+
+```bash
+composer update kernelbridge/licensing-client-laravel
+php artisan optimize:clear
+```
+
+If the client has a customized or previously published view at `resources/views/vendor/kernelbridge-licensing/activation.blade.php`, merge the updated activation form fields into that view. Published views take precedence over the package view, so updating Composer alone will not replace them. Also check that `KERNELBRIDGE_LICENSE_VIEW` does not point to another custom view.
 
 Laravel package discovery registers the provider, migrations, default `/license` routes, the built-in activation controller, middleware aliases, publishable Blade UI, and scheduled verification job.
 
@@ -111,6 +133,8 @@ Route and redirect settings can be changed in `config/kernelbridge-licensing.php
 ],
 ```
 
+The built-in activation view supports `KERNELBRIDGE_LICENSE_BRAND_NAME`, `KERNELBRIDGE_LICENSE_BRAND_SUBTITLE`, `KERNELBRIDGE_LICENSE_HEADING`, `KERNELBRIDGE_LICENSE_DESCRIPTION`, and `KERNELBRIDGE_LICENSE_SHOW_LOGO` for product-specific branding. `KERNELBRIDGE_LICENSE_LOGO_PATH`, `KERNELBRIDGE_LICENSE_LOGO_ALT`, and `KERNELBRIDGE_LICENSE_CSS_PATH` can point to app-provided assets.
+
 To customize the default Blade screen or own the route definitions, publish them:
 
 ```bash
@@ -146,7 +170,7 @@ The package fails closed and requires re-activation when any of these checks fai
 
 During activation and verification, the package stores a signed configuration fingerprint for `KERNELBRIDGE_API_URL`, `KERNELBRIDGE_PRODUCT_CODE`, `KERNELBRIDGE_API_TOKEN`, `APP_KEY`, and `KERNELBRIDGE_CACHE_SIGNING_KEY`. If those values are changed later, protected web routes redirect to `/license` and API requests fail with `402` until the installation is re-activated.
 
-Device activation limits are enforced by the central KernelBridge API. The product app sends its stable `installation_identifier`, product code, device name, and license key during activation. If the license has reached its allowed device count, KernelBridge rejects the request and the package shows an activation-limit message.
+Device activation limits are enforced by the central KernelBridge API. The product app sends its stable `installation_identifier`, product code, computer name, platform URL, machine fingerprint, and license key during activation. The built-in activation form defaults the computer name from the host and the platform URL from `APP_URL`. The platform URL and computer name are recorded as activation details; the machine fingerprint is what binds the activation to the physical or virtual host. If the license has reached its allowed device count, KernelBridge rejects the request and the package shows an activation-limit message.
 
 ## Route protection
 
@@ -255,6 +279,6 @@ php artisan test --filter=LicensingClientTest
 
 ## Machine binding
 
-The client now sends machine_fingerprint with activation, verification and deactivation. It derives a SHA-256 value from the OS machine identity (Windows MachineGuid, Linux machine-id or macOS platform UUID). Activation also sends device_info containing hostname, OS, architecture and client version. If an OS identity cannot be read, licensing fails closed; there is no copyable random-ID fallback. The encrypted, signed version-2 cache includes this fingerprint and cannot be used unchanged on another machine. Existing version-1 caches require online refresh.
+The client now sends machine_fingerprint with activation, verification and deactivation. It derives a SHA-256 value from the OS machine identity (Windows MachineGuid, Linux machine-id or macOS platform UUID). Activation also sends device_info containing hostname, OS, architecture, client version, and platform URL. If an OS identity cannot be read, licensing fails closed; there is no copyable random-ID fallback. The encrypted, signed version-2 cache includes this fingerprint and cannot be used unchanged on another machine. Existing version-1 caches require online refresh.
 
 The platform persists a keyed hash rather than the raw machine identifier. Device-bound MediFlow purchases retain their installation binding after deactivation. Other integrations keep their configured activation capacity, with the machine check enforced for activations that supplied a fingerprint. Browser-only clients cannot reliably supply OS identity; use the server-side Laravel client on the actual licensed host. Containers and cloned operating systems must have independently provisioned machine identities; this mechanism is not remote hardware attestation.

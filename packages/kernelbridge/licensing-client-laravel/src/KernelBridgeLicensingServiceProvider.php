@@ -6,6 +6,7 @@ use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Routing\Router;
 use Illuminate\Support\ServiceProvider;
+use KernelBridge\LicensingClient\Console\ResetLicenseCacheCommand;
 use KernelBridge\LicensingClient\Http\Middleware\FeatureMiddleware;
 use KernelBridge\LicensingClient\Http\Middleware\LicenseMiddleware;
 use KernelBridge\LicensingClient\Http\Middleware\LimitMiddleware;
@@ -47,6 +48,11 @@ final class KernelBridgeLicensingServiceProvider extends ServiceProvider
         if (! $this->app->runningInConsole()) {
             return;
         }
+
+        $this->commands([
+            ResetLicenseCacheCommand::class,
+        ]);
+
         $this->app->booted(function (): void {
             $minutes = min(59, max(1, (int) config('kernelbridge-licensing.verification_interval_minutes', 15)));
             app(Schedule::class)->job(new VerifyLicenseJob)->cron("*/$minutes * * * *")

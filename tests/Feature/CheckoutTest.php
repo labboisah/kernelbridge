@@ -13,9 +13,13 @@ use App\Models\HostingSetting;
 use App\Models\Invoice;
 use App\Models\Payment;
 use App\Models\Plan;
+use App\Models\Product;
 use App\Models\Subscription;
 use App\Models\User;
+use App\Domain\Licensing\Services\EdunexaModulePurchaseService;
+use Database\Seeders\EdunexaModuleSeeder;
 use Database\Seeders\MediFlowPackageSeeder;
+use Database\Seeders\PlanSeeder;
 use Database\Seeders\ProductSeeder;
 use Database\Seeders\RoleAndPermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -139,7 +143,11 @@ class CheckoutTest extends TestCase
         $bundle = ClientSetupBundle::sole();
         $token = $bundle->secrets['api_token'];
         $this->assertStringNotContainsString($token, DB::table('client_setup_bundles')->value('secrets'));
-        $this->get(route('portal.services.environment', $subscription))->assertOk()->assertSee('APP_MODE=client')->assertSee('KERNELBRIDGE_LICENSE_KEY=KBT-');
+        $this->get(route('portal.services.environment', $subscription))->assertOk()->assertSee('APP_MODE=client')->assertSee('KERNELBRIDGE_LICENSE_KEY=KBT-')
+            ->assertSee('MEDIFLOW_CENTRAL_LICENSING=true')
+            ->assertSee('KERNELBRIDGE_LICENSE_REDIRECT_AFTER_ACTIVATION=/configuration')
+            ->assertSee('KERNELBRIDGE_LICENSE_BRAND_NAME=MediFlow')
+            ->assertSee('KERNELBRIDGE_LICENSE_HEADING=Secure access for your care team.');
         $this->get(route('portal.invoices.show', $invoice))->assertInertia(fn (Assert $p) => $p->has('clientSetup.license_key')->has('clientSetup.download_url'));
         app(PaidLicenseService::class)->complete($invoice->fresh(), $this->owner);
         $this->assertDatabaseCount('client_setup_bundles', 1);
@@ -153,6 +161,58 @@ class CheckoutTest extends TestCase
         $this->withToken($token)->postJson('/api/v1/licenses/activate', ['license_key' => $otherKey, 'device_id' => 'foreign-device', 'machine_fingerprint' => str_repeat('a', 64)])->assertUnprocessable();
 
         $this->actingAs(User::factory()->create())->get(route('portal.services.environment', $subscription))->assertForbidden();
+    }
+
+    public function test_edunexa_setup_redirects_to_configuration_after_activation(): void
+    {
+        $product = Product::query()->where('code', 'EDUNEXA')->firstOrFail();
+        $this->plan = Plan::factory()->create(['product_id' => $product->id]);
+        $invoice = $this->order('local');
+        $subscription = Subscription::sole();
+        $this->pay($invoice);
+
+        $this->get(route('portal.services.environment', $subscription))
+            ->assertOk()
+            ->assertSee('KERNELBRIDGE_PRODUCT_CODE=EDUNEXA')
+            ->assertDontSee('MEDIFLOW_CENTRAL_LICENSING=true')
+            ->assertSee('KERNELBRIDGE_LICENSE_REDIRECT_AFTER_ACTIVATION=/configuration');
+        $bundle = ClientSetupBundle::sole();
+        $this->withToken($bundle->secrets['api_token'])->postJson('/api/v1/licenses/activate', [
+            'license_key' => app(LicenseService::class)->key($subscription->license),
+            'device_id' => 'edunexa-installation',
+            'machine_fingerprint' => str_repeat('a', 64),
+            'device_name' => 'EduNexa setup test',
+        ])->assertCreated()->assertJsonPath('data.status', 'active');
+    }
+
+    public function test_edunexa_module_plan_activation_returns_its_configuration(): void
+    {
+        $this->seed([PlanSeeder::class, EdunexaModuleSeeder::class]);
+        $product = Product::query()->where('code', 'EDUNEXA')->firstOrFail();
+        $plan = Plan::query()->where('product_id', $product->id)->where('slug', 'basic')->firstOrFail();
+        $invoice = app(EdunexaModulePurchaseService::class)->purchase(Customer::sole(), $plan->uuid, $this->owner);
+        $this->pay($invoice);
+
+        $subscription = Subscription::sole();
+        $bundle = ClientSetupBundle::sole();
+        $this->withToken($bundle->secrets['api_token'])->postJson('/api/v1/licenses/activate', [
+            'license_key' => app(LicenseService::class)->key($subscription->license),
+            'device_id' => 'edunexa-module-installation',
+            'machine_fingerprint' => str_repeat('a', 64),
+            'device_name' => 'EDUNEXA-SCHOOL-01',
+            'device_info' => [
+                'hostname' => 'EDUNEXA-SCHOOL-01',
+                'os' => 'Windows Server',
+                'architecture' => 'x64',
+                'client_version' => 'laravel-device-v1',
+                'platform_url' => 'https://school.example.test',
+            ],
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'active')
+            ->assertJsonPath('data.configuration.packages.0.key', 'core-school-operations');
+        $activation = $subscription->license->activations()->sole();
+        $this->assertSame('https://school.example.test', data_get($activation->metadata, 'device_info.platform_url'));
+        $this->assertSame('EDUNEXA-SCHOOL-01', $activation->device_name);
     }
 
     public function test_admin_controls_hosting_price_and_customer_cannot_edit_it(): void

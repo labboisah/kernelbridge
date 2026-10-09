@@ -244,3 +244,7 @@ Commission settings now split VAT, Developer, Platform, Staff and Agent shares t
 Migration `2026_10_01_000010_add_vat_commission_allocation` introduces the fifth share using the current VAT setting, reducing Platform first (then Staff, Developer, Agent only if needed) so existing allocations still total 100%. Existing earned commissions are not recalculated.
 
 New successful subscription payments snapshot all five allocations in `product_commission_accruals`. The product table reports generated Developer + Platform + Staff + Agent totals by currency and shows allocated VAT separately. Refunds reverse accruals. Historical agent earnings are included without inventing unrecorded historical allocations for other parties. Generated amounts represent allocations, not completed payouts; agent payout attribution still requires an approved agent client relationship.
+
+### EduNexa module licensing
+
+The `EDUNEXA` product receives its module plans and feature descriptions from `config/edunexa.php`. Run `php artisan db:seed --class=EdunexaModuleSeeder` after deploying to publish the plans. Customers choose modules in the licensing portal; invoices include configured VAT and one-time setup charges. Full payment provisions a device-bound activation code and private client `.env` configuration. EduNexa client activation is served at `/license` when `APP_MODE=client`.

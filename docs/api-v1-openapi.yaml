@@ -39,7 +39,26 @@ paths:
   /licenses/activate:
     post:
       summary: Activate a license for a device
-      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [license_key, device_id], properties: { license_key: { type: string }, device_id: { type: string }, device_name: { type: string } } } } } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [license_key, device_id]
+              properties:
+                license_key: { type: string }
+                device_id: { type: string }
+                device_name: { type: string }
+                machine_fingerprint: { type: string, pattern: '^[a-f0-9]{64}$' }
+                device_info:
+                  type: object
+                  properties:
+                    hostname: { type: string }
+                    os: { type: string }
+                    architecture: { type: string }
+                    client_version: { type: string }
+                    platform_url: { type: string, format: uri }
       responses: { '201': { description: Activated }, '422': { description: Invalid license } }
   /licenses/verify:
     post:

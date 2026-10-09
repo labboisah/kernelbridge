@@ -107,6 +107,7 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
         Route::post('/package-orders/{order:uuid}/cancel', [LicensePurchaseController::class, 'cancel'])->name('licenses.cancel-order');
         Route::post('/invoices/{invoice:uuid}/credit', [LicensePurchaseController::class, 'credit'])->name('invoices.credit');
         Route::post('/licenses/purchase', [LicensePurchaseController::class, 'store'])->middleware('throttle:10,1')->name('licenses.purchase');
+        Route::post('/licenses/edunexa/purchase', [LicensePurchaseController::class, 'purchaseEdunexa'])->middleware('throttle:10,1')->name('licenses.edunexa.purchase');
         Route::get('/licenses', [CustomerPortalController::class, 'licenses'])->name('licenses.index');
         Route::post('/license-activations/{activation:uuid}/deactivate', [CustomerPortalController::class, 'deactivate'])->name('licenses.activations.deactivate');
         Route::get('/invoices', [CustomerPortalController::class, 'invoices'])->name('invoices.index');

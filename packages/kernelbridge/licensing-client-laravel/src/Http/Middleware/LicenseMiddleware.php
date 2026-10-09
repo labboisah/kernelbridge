@@ -80,6 +80,12 @@ class LicenseMiddleware
 
     protected function shouldPassThrough(Request $request): bool
     {
+        // Activation must be reachable before the client has a usable license.
+        // The API route still authenticates its KernelBridge bearer credential.
+        if ($request->is('api/v1/licenses/activate')) {
+            return true;
+        }
+
         $routeName = $this->activationRouteName();
         if ($request->routeIs($routeName)) {
             return true;
@@ -103,7 +109,15 @@ class LicenseMiddleware
 
     protected function activationRouteName(): string
     {
-        return (string) (config('kernelbridge-licensing.redirects.activation_route')
-            ?: config('kernelbridge-licensing.routes.name', 'kernelbridge.license.').'show');
+        $configured = (string) config('kernelbridge-licensing.redirects.activation_route');
+        if ($configured !== '') {
+            return $configured;
+        }
+
+        if (! (bool) config('kernelbridge-licensing.routes.enabled', true)) {
+            return 'setup.license';
+        }
+
+        return (string) (config('kernelbridge-licensing.routes.name', 'kernelbridge.license.').'show');
     }
 }

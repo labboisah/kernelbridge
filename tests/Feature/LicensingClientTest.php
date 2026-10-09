@@ -85,7 +85,7 @@ final class LicensingClientTest extends TestCase
     {
         $this->fakeSuccessfulApi();
 
-        $state = $this->activation->activate('KBT-LIC-SECRET', 'AlignEx production');
+        $state = $this->activation->activate('KBT-LIC-SECRET', 'AlignEx production', 'https://alignex.example.test');
 
         $this->assertSame('active', $state->status);
         $this->assertSame('lic-00000000-0000-4000-8000-000000000001', $state->license_identifier);
@@ -96,7 +96,10 @@ final class LicensingClientTest extends TestCase
         $this->assertStringNotContainsString('KBT-LIC-SECRET', $raw->encrypted_license_key);
         $this->assertStringNotContainsString('finance', $raw->entitlement_payload);
         Http::assertSent(fn (Request $request): bool => $request->hasHeader('Authorization', 'Bearer machine-token')
-            && $request->hasHeader('X-KernelBridge-Product', 'ALIGNEX'));
+            && $request->hasHeader('X-KernelBridge-Product', 'ALIGNEX')
+            && str_ends_with($request->url(), '/licenses/activate')
+            && $request['device_name'] === 'AlignEx production'
+            && $request['device_info']['platform_url'] === 'https://alignex.example.test');
     }
 
     public function test_copied_database_cache_is_not_usable_on_another_computer(): void
@@ -123,6 +126,19 @@ final class LicensingClientTest extends TestCase
 
         $this->assertSame('active', $state->status);
         Http::assertNothingSent();
+    }
+
+    public function test_license_cache_can_be_reset_for_reactivation(): void
+    {
+        $this->fakeSuccessfulApi();
+        $this->activation->activate('KBT-LIC-SECRET');
+
+        $this->assertDatabaseHas('kernelbridge_license_states', ['product_code' => 'ALIGNEX']);
+
+        $this->cache->reset();
+
+        $this->assertDatabaseMissing('kernelbridge_license_states', ['product_code' => 'ALIGNEX']);
+        $this->assertSame('unlicensed', $this->cache->state()->status);
     }
 
     public function test_temporary_outage_uses_signed_grace_but_fails_closed_after_grace(): void
@@ -190,8 +206,9 @@ final class LicensingClientTest extends TestCase
     {
         $this->get('/license')
             ->assertOk()
-            ->assertSee('License status')
-            ->assertSee('KernelBridge Technologies')
+            ->assertSee('Activate your licence')
+            ->assertSee('Computer name')
+            ->assertSee('Your ALIGNEX URL')
             ->assertSee('ALIGNEX');
 
         $this->fakeSuccessfulApi();
@@ -199,9 +216,72 @@ final class LicensingClientTest extends TestCase
         $this->post('/license', [
             'license_key' => 'KBT-LIC-SECRET',
             'device_name' => 'AlignEx production',
+            'platform_url' => 'https://alignex.example.test',
         ])->assertRedirect('/');
 
         $this->assertTrue($this->cache->hasUsableLicense());
+    }
+
+    public function test_edunexa_activation_page_requests_platform_url_and_computer_name(): void
+    {
+        config()->set('kernelbridge-licensing.product_code', 'EDUNEXA');
+
+        $this->get('/license')
+            ->assertOk()
+            ->assertSee('Computer name')
+            ->assertSee('Your EduNexa URL')
+            ->assertSee('name="platform_url"', false);
+    }
+
+    public function test_first_activation_uses_the_configured_setup_redirect(): void
+    {
+        config()->set('kernelbridge-licensing.product_code', 'EDUNEXA');
+        config()->set('kernelbridge-licensing.redirects.after_activation', '/configuration');
+        session()->put('url.intended', '/client-dashboard');
+        $this->fakeSuccessfulApi();
+
+        $this->post('/license', [
+            'license_key' => 'KBT-LIC-SECRET',
+            'device_name' => 'EduNexa production',
+            'platform_url' => 'https://edunexa.example.test',
+        ])->assertRedirect('/configuration');
+    }
+
+    public function test_reactivation_does_not_use_the_first_activation_setup_redirect(): void
+    {
+        config()->set('kernelbridge-licensing.product_code', 'EDUNEXA');
+        $this->fakeSuccessfulApi();
+        $this->activation->activate('KBT-LIC-SECRET');
+        config()->set('kernelbridge-licensing.redirects.after_activation', '/configuration');
+        session()->put('url.intended', '/client-dashboard');
+
+        $this->post('/license', [
+            'license_key' => 'KBT-LIC-SECRET',
+            'device_name' => 'EduNexa production',
+            'platform_url' => 'https://edunexa.example.test',
+        ])->assertRedirect('/client-dashboard');
+    }
+
+    public function test_activation_page_uses_configured_product_branding(): void
+    {
+        config()->set('kernelbridge-licensing.product_code', 'MEDIFLOW');
+        config()->set('kernelbridge-licensing.ui', [
+            'brand_name' => 'MediFlow',
+            'brand_subtitle' => 'Healthcare Management',
+            'heading' => 'Secure access for your care team.',
+            'description' => 'Activate your MediFlow license to protect patient data.',
+            'show_logo' => false,
+        ]);
+
+        $this->get('/license')
+            ->assertOk()
+            ->assertSee('<title>Activate MediFlow</title>', false)
+            ->assertSee('Healthcare Management')
+            ->assertSee('Secure access for your care team.')
+            ->assertSee('Activate your MediFlow license to protect patient data.')
+            ->assertSee('Activation licence code')
+            ->assertSee('Activate MediFlow')
+            ->assertDontSee('KernelBridge Technologies');
     }
 
     public function test_unlicensed_web_requests_redirect_to_activation_ui_but_json_requests_return_402(): void
@@ -225,6 +305,7 @@ final class LicensingClientTest extends TestCase
         $this->post('/license', [
             'license_key' => 'KBT-LIC-SECRET',
             'device_name' => 'Client app production',
+            'platform_url' => 'https://client.example.test',
         ])->assertRedirect('/');
 
         $this->get('/client-dashboard')
@@ -281,6 +362,7 @@ final class LicensingClientTest extends TestCase
         $this->post('/license', [
             'license_key' => 'KBT-LIC-SECRET',
             'device_name' => 'Second device',
+            'platform_url' => 'https://client.example.test',
         ])
             ->assertSessionHasErrors('license_key')
             ->assertRedirect();
