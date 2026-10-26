@@ -54,6 +54,14 @@ php artisan db:seed --force
 
 The idempotent seeders create `super_admin`, `admin`, `sales`, `finance`, `support`, and `customer`, then create or update the first super administrator from environment values. For local reset only, use `php artisan migrate:fresh --seed`.
 
+The full seed also creates four visible, unpriced MarketLens plan drafts with the mode/shareholder feature-key structure and hides the generic MarketLens Basic/Professional/Enterprise plans from new purchases. Checkout rejects unpriced plans until Product/Sales/Finance enters approved prices. To rerun only the MarketLens catalogue setup:
+
+```bash
+php artisan db:seed --class=MarketLensPlanSeeder
+```
+
+The MarketLens seeder preserves administrator-entered prices, active/public state, feature edits, existing subscriptions, and historical records. New plans are visible but cannot be purchased until priced.
+
 ## Frontend
 
 ```bash
@@ -140,6 +148,10 @@ The shared licensing behavior is now defined in [Licensing client spec](docs/LIC
 - [TypeScript client](packages/kernelbridge/licensing-client-typescript/README.md)
 - [Spring Boot starter](packages/kernelbridge/licensing-client-spring-boot/README.md)
 - [Django client](packages/kernelbridge/licensing-client-django/README.md)
+
+### Licensing client security model
+
+The Laravel package is published from GitHub and is intentionally fail-closed. It treats local config as bootstrap input, records a deployment fingerprint in the product database, and blocks activation or verification when the active runtime configuration no longer matches that recorded profile. Real deployment changes must be performed through the CLI re-provision command rather than silently allowing local config drift. This detects accidental drift; it is not protection against a hostile administrator who controls the client files and database.
 
 
 

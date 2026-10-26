@@ -31,7 +31,7 @@ final readonly class AuthenticateApiClient
         $request->attributes->set('api_client', $credential->client);
         $request->attributes->set('api_credential', $credential);
 
-        if ($credential->client->subscription_id && ! $request->routeIs('api.v1.licenses.activate', 'api.v1.licenses.verify', 'api.v1.licenses.deactivate', 'api.v1.subscriptions.status', 'api.v1.entitlements.index')) {
+        if ($credential->client->subscription_id && ! $request->routeIs('api.v1.licenses.redeem', 'api.v1.licenses.activate', 'api.v1.licenses.verify', 'api.v1.licenses.deactivate', 'api.v1.subscriptions.status', 'api.v1.entitlements.index')) {
             return ApiResponse::error($request, 'forbidden', 'This credential is restricted to installation licensing.', 403);
         }
 

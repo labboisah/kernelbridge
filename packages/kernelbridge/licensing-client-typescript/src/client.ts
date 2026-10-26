@@ -8,14 +8,14 @@ export class KernelBridgeLicenseClient {
     this.fetcher = options.fetch ?? globalThis.fetch;
   }
 
-  activate(licenseKey: string, installationIdentifier: string, deviceName?: string): Promise<LicenseResponse> {
-    return this.request('POST', '/licenses/activate', { license_key: licenseKey, device_id: installationIdentifier, ...(deviceName ? { device_name: deviceName } : {}) });
+  activate(licenseKey: string, installationIdentifier: string, deviceName?: string, machineFingerprint?: string): Promise<LicenseResponse> {
+    return this.request('POST', '/licenses/activate', { license_key: licenseKey, device_id: installationIdentifier, ...(deviceName ? { device_name: deviceName } : {}), ...(machineFingerprint ? { machine_fingerprint: machineFingerprint } : {}) });
   }
-  verify(licenseKey: string, installationIdentifier: string): Promise<LicenseResponse> {
-    return this.request('POST', '/licenses/verify', { license_key: licenseKey, device_id: installationIdentifier });
+  verify(licenseKey: string, installationIdentifier: string, machineFingerprint?: string): Promise<LicenseResponse> {
+    return this.request('POST', '/licenses/verify', { license_key: licenseKey, device_id: installationIdentifier, ...(machineFingerprint ? { machine_fingerprint: machineFingerprint } : {}) });
   }
-  deactivate(licenseKey: string, installationIdentifier: string): Promise<DeactivationResponse> {
-    return this.request('POST', '/licenses/deactivate', { license_key: licenseKey, device_id: installationIdentifier });
+  deactivate(licenseKey: string, installationIdentifier: string, machineFingerprint?: string): Promise<DeactivationResponse> {
+    return this.request('POST', '/licenses/deactivate', { license_key: licenseKey, device_id: installationIdentifier, ...(machineFingerprint ? { machine_fingerprint: machineFingerprint } : {}) });
   }
   getEntitlements(subscriptionIdentifier: string): Promise<EntitlementResponse> {
     return this.request('GET', '/entitlements', { subscription_uuid: subscriptionIdentifier });

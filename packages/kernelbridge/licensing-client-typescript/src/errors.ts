@@ -1,7 +1,11 @@
 export type LicenseAccessErrorCode =
   | 'activation_limit_reached'
   | 'configuration_tampered'
+  | 'deployment_profile_missing'
+  | 'device_identity_unavailable'
+  | 'device_mismatch'
   | 'feature_unavailable'
+  | 'invalid_entitlement_signature'
   | 'license_active'
   | 'license_deactivated'
   | 'license_expired'
@@ -16,7 +20,7 @@ export type LicenseAccessErrorCode =
   | 'subscription_required';
 
 export class KernelBridgeApiError extends Error {
-  constructor(message: string, public readonly code: string, public readonly status: number) { super(message); this.name = 'KernelBridgeApiError'; }
+  constructor(message: string, public readonly code: string, public readonly status: number, options?: ErrorOptions) { super(message, options); this.name = 'KernelBridgeApiError'; }
 }
 
 export class KernelBridgeUnavailableError extends Error {

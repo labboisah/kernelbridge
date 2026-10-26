@@ -31,9 +31,10 @@ export interface EntitlementResponse {
 }
 
 export interface LicenseState {
-  version: 1;
+  version: 2;
   productCode: string;
   installationIdentifier: string;
+  machineFingerprint: string | null;
   licenseIdentifier: string | null;
   subscriptionIdentifier: string | null;
   activationIdentifier: string | null;
@@ -44,6 +45,7 @@ export interface LicenseState {
   entitlements: EntitlementMap;
   signedEntitlementPayload: string | null;
   entitlementSignature: string | null;
+  signatureAlgorithm: string | null;
   signatureKeyId: string | null;
   encryptedLicenseKey: string | null;
   configFingerprint: string | null;
@@ -65,13 +67,24 @@ export interface SecretVault {
 
 export interface LicenseAccessDecision { allowed: boolean; reason: string; message: string }
 export interface TokenProvider { getToken(): Promise<string> | string }
-export interface EntitlementSignatureVerifier { verify(payload: string, signature: string): boolean }
+export interface EntitlementSignatureVerifier { verify(payload: string, signature: string, keyId?: string): boolean }
+export interface MachineIdentityProvider { getFingerprint(): Promise<string> }
+export type DeploymentProfileMode = 'disabled' | 'compatibility' | 'strict';
+export interface DeploymentProfileStatus {
+  mode: DeploymentProfileMode;
+  initialized: boolean;
+  matches: boolean;
+  profileVersion: number | null;
+  initializedAt: string | null;
+  reprovisionedAt: string | null;
+}
 
 export interface LicensingClientOptions {
   apiUrl: string;
   productCode: string;
   apiToken?: string;
   tokenProvider?: TokenProvider;
+  tokenProviderFingerprint?: string;
   timeoutMs?: number;
   verificationIntervalMs?: number;
   offlineGraceMs?: number;
@@ -82,6 +95,8 @@ export interface LicensingClientOptions {
   renewalNoticeThresholdMonths?: number[];
   requireSignedEntitlements?: boolean;
   signatureVerifier?: EntitlementSignatureVerifier;
+  machineIdentityProvider?: MachineIdentityProvider;
+  deploymentProfileMode?: DeploymentProfileMode;
   fetch?: typeof globalThis.fetch;
   now?: () => Date;
 }

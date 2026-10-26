@@ -15,7 +15,20 @@ final class PlanSeeder extends Seeder
         $products = Product::query()->published()->with('productFeatures')->get();
 
         foreach ($products as $product) {
-            foreach ($this->plansFor($product) as $index => $data) {
+            if ($product->code === 'MARKETLENS') {
+                continue;
+            }
+
+            $definitions = $this->plansFor($product);
+            if ($product->code === 'ALIGNEX') {
+                $activeSlugs = array_column($definitions, 'slug');
+                Plan::query()
+                    ->where('product_id', $product->id)
+                    ->whereNotIn('slug', $activeSlugs)
+                    ->update(['is_active' => false, 'is_public' => false]);
+            }
+
+            foreach ($definitions as $index => $data) {
                 $features = $data['features'];
                 unset($data['features']);
 
@@ -61,22 +74,79 @@ final class PlanSeeder extends Seeder
     /** @return array<int, array<string, mixed>> */
     private function alignExPlans(): array
     {
-        return [
-            ['name' => 'Basic', 'slug' => 'basic', 'description' => 'Core examination workflows for small institutions.', 'billing_cycle' => BillingCycle::Annual, 'price' => 75000, 'features' => [
-                ['feature_key' => 'max_users', 'feature_name' => 'Administrative users', 'enabled' => true, 'limit_value' => '5'],
-                ['feature_key' => 'max_candidates', 'feature_name' => 'Candidates', 'enabled' => true, 'limit_value' => '1000'],
-                ['feature_key' => 'sms_enabled', 'feature_name' => 'SMS notifications', 'enabled' => false, 'limit_value' => null],
-            ]],
-            ['name' => 'Professional', 'slug' => 'professional', 'description' => 'Expanded capacity and communication tools for growing institutions.', 'billing_cycle' => BillingCycle::Annual, 'price' => 180000, 'features' => [
-                ['feature_key' => 'max_users', 'feature_name' => 'Administrative users', 'enabled' => true, 'limit_value' => '25'],
-                ['feature_key' => 'max_candidates', 'feature_name' => 'Candidates', 'enabled' => true, 'limit_value' => '10000'],
-                ['feature_key' => 'sms_enabled', 'feature_name' => 'SMS notifications', 'enabled' => true, 'limit_value' => null],
-            ]],
-            ['name' => 'Enterprise', 'slug' => 'enterprise', 'description' => 'Custom capacity, integrations, and implementation support.', 'billing_cycle' => BillingCycle::Custom, 'price' => null, 'features' => [
-                ['feature_key' => 'max_users', 'feature_name' => 'Administrative users', 'enabled' => true, 'limit_value' => 'unlimited'],
-                ['feature_key' => 'max_candidates', 'feature_name' => 'Candidates', 'enabled' => true, 'limit_value' => 'unlimited'],
-                ['feature_key' => 'sms_enabled', 'feature_name' => 'SMS notifications', 'enabled' => true, 'limit_value' => null],
-            ]],
+        $entities = [
+            [
+                'key' => 'secondary-school',
+                'name' => 'Secondary School',
+                'tiers' => [
+                    ['key' => 'basic', 'name' => 'Basic', 'price' => 85000, 'admins' => '8', 'exams' => '25', 'candidates' => '2500', 'servers' => '1', 'sms' => false],
+                    ['key' => 'standard', 'name' => 'Standard', 'price' => 165000, 'admins' => '20', 'exams' => '60', 'candidates' => '7000', 'servers' => '2', 'sms' => true],
+                    ['key' => 'school', 'name' => 'School', 'price' => 260000, 'admins' => '40', 'exams' => '120', 'candidates' => '15000', 'servers' => '3', 'sms' => true],
+                ],
+            ],
+            [
+                'key' => 'institution',
+                'name' => 'Institution',
+                'tiers' => [
+                    ['key' => 'basic', 'name' => 'Basic', 'price' => 150000, 'admins' => '20', 'exams' => '80', 'candidates' => '12000', 'servers' => '2', 'sms' => true],
+                    ['key' => 'standard', 'name' => 'Standard', 'price' => 300000, 'admins' => '60', 'exams' => '200', 'candidates' => '50000', 'servers' => '4', 'sms' => true],
+                    ['key' => 'enterprise', 'name' => 'Enterprise', 'price' => null, 'admins' => 'unlimited', 'exams' => 'unlimited', 'candidates' => 'unlimited', 'servers' => '8', 'sms' => true],
+                ],
+            ],
+            [
+                'key' => 'cbt-center',
+                'name' => 'CBT Center',
+                'tiers' => [
+                    ['key' => 'basic', 'name' => 'Basic', 'price' => 125000, 'admins' => '15', 'exams' => '120', 'candidates' => '10000', 'servers' => '2', 'sms' => false],
+                    ['key' => 'standard', 'name' => 'Standard', 'price' => 240000, 'admins' => '35', 'exams' => '260', 'candidates' => '30000', 'servers' => '3', 'sms' => true],
+                    ['key' => 'enterprise', 'name' => 'Enterprise', 'price' => null, 'admins' => 'unlimited', 'exams' => 'unlimited', 'candidates' => 'unlimited', 'servers' => '6', 'sms' => true],
+                ],
+            ],
+            [
+                'key' => 'organization',
+                'name' => 'Organization',
+                'tiers' => [
+                    ['key' => 'basic', 'name' => 'Basic', 'price' => 110000, 'admins' => '12', 'exams' => '50', 'candidates' => '5000', 'servers' => '1', 'sms' => false],
+                    ['key' => 'standard', 'name' => 'Standard', 'price' => 220000, 'admins' => '30', 'exams' => '120', 'candidates' => '15000', 'servers' => '3', 'sms' => true],
+                    ['key' => 'enterprise', 'name' => 'Enterprise', 'price' => null, 'admins' => 'unlimited', 'exams' => 'unlimited', 'candidates' => 'unlimited', 'servers' => '6', 'sms' => true],
+                ],
+            ],
         ];
+
+        $plans = [];
+        foreach ($entities as $entity) {
+            foreach ($entity['tiers'] as $tier) {
+                $plans[] = [
+                    'name' => $entity['name'].' '.$tier['name'],
+                    'slug' => $entity['key'].'-'.$tier['key'],
+                    'description' => $this->alignExDescription($entity['name'], $tier['name']),
+                    'billing_cycle' => $tier['price'] === null ? BillingCycle::Custom : BillingCycle::Annual,
+                    'price' => $tier['price'],
+                    'features' => $this->alignExFeatures($entity['name'], $tier),
+                ];
+            }
+        }
+
+        return $plans;
+    }
+
+    /** @param array<string, mixed> $tier */
+    private function alignExFeatures(string $entityName, array $tier): array
+    {
+        return [
+            ['feature_key' => 'entity_type', 'feature_name' => 'Entity type', 'enabled' => true, 'limit_value' => $entityName],
+            ['feature_key' => 'delivery_online', 'feature_name' => 'Online delivery', 'enabled' => true, 'limit_value' => 'enabled'],
+            ['feature_key' => 'delivery_offline', 'feature_name' => 'Offline delivery', 'enabled' => true, 'limit_value' => 'enabled'],
+            ['feature_key' => 'max_users', 'feature_name' => 'Administrative users', 'enabled' => true, 'limit_value' => (string) $tier['admins']],
+            ['feature_key' => 'max_exams_per_month', 'feature_name' => 'Exams per month', 'enabled' => true, 'limit_value' => (string) $tier['exams']],
+            ['feature_key' => 'max_candidates', 'feature_name' => 'Candidates', 'enabled' => true, 'limit_value' => (string) $tier['candidates']],
+            ['feature_key' => 'max_server_installations', 'feature_name' => 'Offline servers', 'enabled' => true, 'limit_value' => (string) $tier['servers']],
+            ['feature_key' => 'sms_enabled', 'feature_name' => 'SMS notifications', 'enabled' => (bool) $tier['sms'], 'limit_value' => null],
+        ];
+    }
+
+    private function alignExDescription(string $entityName, string $tierName): string
+    {
+        return sprintf('%s %s plan for controlled online and offline examination delivery.', $entityName, $tierName);
     }
 }

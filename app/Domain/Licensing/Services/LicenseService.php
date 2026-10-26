@@ -3,6 +3,7 @@
 namespace App\Domain\Licensing\Services;
 
 use App\Models\ApiClient;
+use App\Models\LicenseBusinessClaim;
 use App\Models\LicenseActivation;
 use App\Models\SoftwareLicense;
 use App\Models\Subscription;
@@ -14,6 +15,45 @@ use Illuminate\Validation\ValidationException;
 
 final class LicenseService
 {
+    public function claim(ApiClient $client, string $activationCode, string $businessUuid): array
+    {
+        return DB::transaction(function () use ($client, $activationCode, $businessUuid): array {
+            $license = $this->resolve($client, $activationCode, true);
+            $claim = LicenseBusinessClaim::query()
+                ->where('software_license_id', $license->id)
+                ->lockForUpdate()
+                ->first();
+
+            if ($claim && $claim->business_uuid !== $businessUuid) {
+                throw ValidationException::withMessages([
+                    'activation_code' => 'This license has already been claimed by another business.',
+                ]);
+            }
+
+            $businessClaim = LicenseBusinessClaim::query()
+                ->where('product_id', $client->product_id)
+                ->where('business_uuid', $businessUuid)
+                ->lockForUpdate()
+                ->first();
+
+            if ($businessClaim && $businessClaim->software_license_id !== $license->id) {
+                throw ValidationException::withMessages([
+                    'business_uuid' => 'This business already has a claim for another license.',
+                ]);
+            }
+
+            if (! $claim) {
+                LicenseBusinessClaim::query()->create([
+                    'software_license_id' => $license->id,
+                    'product_id' => $client->product_id,
+                    'business_uuid' => $businessUuid,
+                ]);
+            }
+
+            return $this->businessClaimPayload($license);
+        });
+    }
+
     public function issue(Subscription $subscription, int $maxActivations = 1): array
     {
         return DB::transaction(function () use ($subscription, $maxActivations): array {
@@ -170,6 +210,31 @@ final class LicenseService
             ],
             'entitlements' => ['entitlements' => $subscription->entitlements()->whereNull('effective_until')->get()
                 ->map(fn ($item) => ['key' => $item->feature_key, 'name' => $item->feature_name, 'enabled' => $item->enabled, 'limit' => $item->limit_value])->all()],
+        ];
+    }
+
+    private function businessClaimPayload(SoftwareLicense $license): array
+    {
+        $subscription = $license->subscription;
+
+        return [
+            'product_code' => strtoupper((string) $license->product()->value('code')),
+            'license_uuid' => $license->uuid,
+            'subscription_uuid' => $subscription->uuid,
+            'status' => 'active',
+            'expires_at' => $license->expires_at?->toISOString(),
+            'grace_expires_at' => $subscription->grace_ends_at?->toISOString(),
+            'entitlements' => $subscription->entitlements()
+                ->whereNull('effective_until')
+                ->orderBy('feature_key')
+                ->get()
+                ->map(fn ($entitlement) => [
+                    'key' => $entitlement->feature_key,
+                    'name' => $entitlement->feature_name,
+                    'enabled' => $entitlement->enabled,
+                    'limit' => $entitlement->limit_value,
+                ])
+                ->all(),
         ];
     }
 

@@ -18,7 +18,9 @@ use KernelBridge\LicensingClient\Http\Middleware\FeatureMiddleware;
 use KernelBridge\LicensingClient\Http\Middleware\LicenseMiddleware;
 use KernelBridge\LicensingClient\Http\Middleware\LimitMiddleware;
 use KernelBridge\LicensingClient\KernelBridgeLicenseClient;
+use KernelBridge\LicensingClient\Models\DeploymentProfile;
 use KernelBridge\LicensingClient\Models\LicenseState;
+use KernelBridge\LicensingClient\Services\DeploymentProfile as DeploymentProfileService;
 use KernelBridge\LicensingClient\Services\DeviceIdentity;
 use KernelBridge\LicensingClient\Services\LicenseActivationService;
 use KernelBridge\LicensingClient\Services\LicenseCacheService;
@@ -54,6 +56,11 @@ final class LicensingClientTest extends TestCase
 
         if (! Schema::hasTable('kernelbridge_license_states')) {
             $migration = require base_path('packages/kernelbridge/licensing-client-laravel/database/migrations/2026_01_01_000000_create_kernelbridge_license_states_table.php');
+            $migration->up();
+        }
+
+        if (! Schema::hasTable('kernelbridge_deployment_profiles')) {
+            $migration = require base_path('packages/kernelbridge/licensing-client-laravel/database/migrations/2026_01_01_000002_create_kernelbridge_deployment_profiles_table.php');
             $migration->up();
         }
 
@@ -366,6 +373,80 @@ final class LicensingClientTest extends TestCase
         ])
             ->assertSessionHasErrors('license_key')
             ->assertRedirect();
+    }
+
+    public function test_runtime_status_reports_an_explicit_reason_and_revision_for_a_valid_license(): void
+    {
+        $this->fakeSuccessfulApi();
+        $this->activation->activate('KBT-LIC-SECRET');
+
+        $status = $this->cache->status();
+
+        $this->assertTrue($status['active']);
+        $this->assertSame('active', $status['status']);
+        $this->assertSame('active', $status['reason']);
+        $this->assertNotNull($status['revision']);
+        $this->assertNotNull($status['effective_at']);
+        $this->assertNotNull($status['expires_at']);
+        $this->assertNotNull($status['offline_grace_expires_at']);
+        $this->assertArrayHasKey('features', $status);
+
+        config()->set('kernelbridge-licensing.api_token', 'tampered-machine-token');
+
+        $tampered = $this->cache->status();
+        $this->assertFalse($tampered['active']);
+        $this->assertSame('configuration_tampered', $tampered['reason']);
+    }
+
+    public function test_deployment_profile_requires_config_to_match_the_persisted_profile(): void
+    {
+        config()->set('kernelbridge-licensing.deployment.strict_profile', true);
+        app(DeploymentProfileService::class)->persist();
+
+        config()->set('kernelbridge-licensing.api_token', 'different-machine-token');
+
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessage('deployment profile mismatch');
+
+        app(DeploymentProfileService::class)->assertReady();
+    }
+
+    public function test_reprovision_profile_updates_the_persisted_deployment_record(): void
+    {
+        config()->set('kernelbridge-licensing.deployment.strict_profile', true);
+        $this->assertDatabaseMissing('kernelbridge_deployment_profiles', ['product_code' => 'ALIGNEX']);
+
+        app(DeploymentProfileService::class)->persist();
+        $original = DeploymentProfile::query()->where('product_code', 'ALIGNEX')->firstOrFail();
+
+        config()->set('kernelbridge-licensing.api_token', 'rotated-machine-token');
+        $updated = app(DeploymentProfileService::class)->persist();
+
+        $this->assertSame($original->id, $updated->id);
+        $this->assertSame('ALIGNEX', $updated->product_code);
+        $this->assertSame(hash('sha256', 'rotated-machine-token'), hash('sha256', config('kernelbridge-licensing.api_token')));
+        $this->assertSame($updated->fingerprint, app(DeploymentProfileService::class)->fingerprint());
+    }
+
+    public function test_deployment_profile_reprovision_is_not_exposed_as_a_web_route(): void
+    {
+        $this->post('/license/reprovision')->assertNotFound();
+    }
+
+    public function test_reprovision_command_persists_a_complete_rotated_deployment_profile(): void
+    {
+        config()->set('kernelbridge-licensing.deployment.strict_profile', true);
+        app(DeploymentProfileService::class)->persist();
+        config()->set('kernelbridge-licensing.api_token', 'rotated-machine-token');
+
+        $this->artisan('kernelbridge:reprovision-profile', ['--force' => true])
+            ->expectsOutput('Deployment profile persisted for ALIGNEX.')
+            ->assertSuccessful();
+
+        $this->assertSame(
+            app(DeploymentProfileService::class)->fingerprint(),
+            DeploymentProfile::query()->where('product_code', 'ALIGNEX')->firstOrFail()->fingerprint,
+        );
     }
 
     private function fakeSuccessfulApi(?Carbon $expiresAt = null): void

@@ -5,6 +5,7 @@ namespace Tests\Feature\Api;
 use App\Domain\Integration\Services\ApiCredentialService;
 use App\Domain\Licensing\Services\LicenseService;
 use App\Enums\UserRole;
+use App\Models\ApiClient;
 use App\Models\Customer;
 use App\Models\Plan;
 use App\Models\Product;
@@ -60,6 +61,131 @@ final class ProductIntegrationApiTest extends TestCase
         $this->withToken($token)->postJson('/api/v1/licenses/verify', $payload)->assertOk()->assertJsonPath('data.activation_uuid', $activation['activation_uuid']);
         $this->withToken($token)->postJson('/api/v1/licenses/deactivate', $payload)->assertOk()->assertJsonPath('data.status', 'deactivated');
         $this->withToken($token)->postJson('/api/v1/licenses/verify', $payload)->assertUnprocessable()->assertJsonPath('error.code', 'validation_failed');
+    }
+
+    public function test_license_redemption_claims_a_business_without_consuming_an_installation(): void
+    {
+        [, $token] = $this->credential();
+        $subscription = $this->subscription();
+        $subscription->entitlements()->create(['feature_key' => 'mode.sales', 'feature_name' => 'Sales', 'enabled' => true, 'limit_value' => null, 'source_plan_id' => $subscription->plan_id, 'effective_from' => now()]);
+        $issued = app(LicenseService::class)->issue($subscription, 1);
+        $businessUuid = (string) Str::uuid();
+        $payload = [
+            'activation_code' => $issued['license_key'],
+            'business_uuid' => $businessUuid,
+            'product_code' => 'ALIGNEX',
+        ];
+
+        $first = $this->withToken($token)->postJson('/api/v1/licenses/redeem', $payload)
+            ->assertOk()
+            ->assertJsonPath('data.status', 'active')
+            ->assertJsonPath('data.product_code', 'ALIGNEX')
+            ->assertJsonPath('data.entitlements.0.key', 'mode.sales')
+            ->json('data');
+
+        $retry = $this->withToken($token)->postJson('/api/v1/licenses/redeem', $payload)
+            ->assertOk()
+            ->json('data');
+
+        $this->withToken($token)->postJson('/api/v1/licenses/redeem', [
+            ...$payload,
+            'business_uuid' => (string) Str::uuid(),
+        ])->assertUnprocessable()->assertJsonPath('error.code', 'validation_failed');
+
+        $this->assertSame($first['license_uuid'], $retry['license_uuid']);
+        $this->assertDatabaseCount('license_business_claims', 1);
+        $this->assertDatabaseCount('license_activations', 0);
+    }
+
+    public function test_installation_grants_are_bound_idempotent_and_limited(): void
+    {
+        [, $token] = $this->credential();
+        $subscription = $this->subscription();
+        $subscription->entitlements()->create(['feature_key' => 'max_server_installations', 'feature_name' => 'Business Server installations', 'enabled' => true, 'limit_value' => '1', 'source_plan_id' => $subscription->plan_id, 'effective_from' => now()]);
+        $issued = app(LicenseService::class)->issue($subscription, 5);
+        $businessUuid = (string) Str::uuid();
+        $client = ApiClient::query()->where('product_id', $subscription->product_id)->firstOrFail();
+        app(LicenseService::class)->claim($client, $issued['license_key'], $businessUuid);
+        $payload = [
+            'license_uuid' => $issued['license']->uuid,
+            'business_uuid' => $businessUuid,
+            'branch_uuid' => (string) Str::uuid(),
+            'device_uuid' => (string) Str::uuid(),
+            'installation_uuid' => (string) Str::uuid(),
+        ];
+
+        $first = $this->withToken($token)->postJson('/api/v1/licenses/installation-grants', $payload)
+            ->assertCreated()
+            ->assertJsonPath('data.status', 'issued')
+            ->assertJsonPath('data.product_code', 'ALIGNEX')
+            ->json('data');
+        $retry = $this->withToken($token)->postJson('/api/v1/licenses/installation-grants', $payload)
+            ->assertOk()
+            ->json('data');
+
+        $this->assertSame($first['grant_uuid'], $retry['grant_uuid']);
+        $this->assertSame($first['credential'], $retry['credential']);
+        $this->assertDatabaseCount('license_installation_grants', 1);
+
+        $this->withToken($token)->postJson('/api/v1/licenses/installation-grants', [
+            ...$payload,
+            'installation_uuid' => (string) Str::uuid(),
+            'device_uuid' => (string) Str::uuid(),
+        ])->assertUnprocessable()->assertJsonPath('error.code', 'validation_failed');
+
+        $rotated = $this->withToken($token)->postJson('/api/v1/licenses/installation-grants/'.$first['grant_uuid'].'/rotate')
+            ->assertOk()
+            ->json('data');
+        $this->assertNotSame($first['credential'], $rotated['credential']);
+
+        $this->withToken($token)->postJson('/api/v1/licenses/installation-grants/'.$first['grant_uuid'].'/revoke')
+            ->assertOk()
+            ->assertJsonPath('data.status', 'revoked');
+
+        $this->withToken($token)->postJson('/api/v1/licenses/installation-grants', [
+            ...$payload,
+            'installation_uuid' => (string) Str::uuid(),
+            'device_uuid' => (string) Str::uuid(),
+        ])->assertCreated();
+
+        $this->assertDatabaseCount('license_installation_grants', 2);
+    }
+
+    public function test_missing_subscription_snapshot_uses_plan_server_limit_for_entitlements_and_grants(): void
+    {
+        [, $token] = $this->credential();
+        $subscription = $this->subscription();
+        $subscription->plan->features()->create([
+            'feature_key' => 'max_server_installations',
+            'feature_name' => 'Business Server installations',
+            'description' => 'Server installation limit',
+            'enabled' => true,
+            'limit_value' => '1',
+            'sort_order' => 100,
+        ]);
+
+        $this->withToken($token)
+            ->getJson('/api/v1/entitlements?subscription_uuid='.$subscription->uuid)
+            ->assertOk()
+            ->assertJsonPath('data.entitlements.0.key', 'max_server_installations')
+            ->assertJsonPath('data.entitlements.0.limit', 1);
+
+        $issued = app(LicenseService::class)->issue($subscription, 5);
+        $businessUuid = (string) Str::uuid();
+        $client = ApiClient::query()->where('product_id', $subscription->product_id)->firstOrFail();
+        app(LicenseService::class)->claim($client, $issued['license_key'], $businessUuid);
+        $payload = [
+            'license_uuid' => $issued['license']->uuid,
+            'business_uuid' => $businessUuid,
+            'branch_uuid' => (string) Str::uuid(),
+            'device_uuid' => (string) Str::uuid(),
+            'installation_uuid' => (string) Str::uuid(),
+        ];
+
+        $this->withToken($token)
+            ->postJson('/api/v1/licenses/installation-grants', $payload)
+            ->assertCreated()
+            ->assertJsonPath('data.status', 'issued');
     }
 
     public function test_subscription_entitlements_and_demo_event_endpoints_expose_public_identifiers_only(): void

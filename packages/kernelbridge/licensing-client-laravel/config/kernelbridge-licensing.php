@@ -1,6 +1,11 @@
 <?php
 
 return [
+    'deployment' => [
+        'mode' => env('KERNELBRIDGE_DEPLOYMENT_MODE', env('APP_MODE', 'client')),
+        'allow_local_fallback' => (bool) env('KERNELBRIDGE_ALLOW_LOCAL_FALLBACK', false),
+        'strict_profile' => (bool) env('KERNELBRIDGE_STRICT_DEPLOYMENT_PROFILE', true),
+    ],
     'api_url' => env('KERNELBRIDGE_API_URL', 'https://kernelbridge.com/api/v1'),
     'product_code' => env('KERNELBRIDGE_PRODUCT_CODE'),
     'api_token' => env('KERNELBRIDGE_API_TOKEN'),

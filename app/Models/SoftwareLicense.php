@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Str;
 
 final class SoftwareLicense extends Model
@@ -31,8 +32,18 @@ final class SoftwareLicense extends Model
         return $this->belongsTo(Subscription::class);
     }
 
+    public function product(): BelongsTo
+    {
+        return $this->belongsTo(Product::class);
+    }
+
     public function activations(): HasMany
     {
         return $this->hasMany(LicenseActivation::class);
+    }
+
+    public function businessClaim(): HasOne
+    {
+        return $this->hasOne(LicenseBusinessClaim::class);
     }
 }

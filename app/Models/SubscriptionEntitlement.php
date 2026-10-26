@@ -8,7 +8,17 @@ use Illuminate\Support\Str;
 
 final class SubscriptionEntitlement extends Model
 {
-    protected $fillable = ['uuid', 'feature_key', 'feature_name', 'enabled', 'limit_value', 'source_plan_id', 'effective_from', 'effective_until'];
+    protected $fillable = [
+        'uuid',
+        'subscription_id',
+        'feature_key',
+        'feature_name',
+        'enabled',
+        'limit_value',
+        'source_plan_id',
+        'effective_from',
+        'effective_until',
+    ];
 
     protected static function booted(): void
     {

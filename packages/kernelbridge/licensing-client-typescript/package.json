@@ -37,6 +37,8 @@
     "better-sqlite3": {
       "optional": true
     }
+  },
+  "dependencies": {
+    "node-machine-id": "^1.1.12"
   }
 }
-

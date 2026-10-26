@@ -36,6 +36,18 @@ Required endpoints:
 
 Activation and verification requests must send a stable installation identifier as `device_id`. The identifier must be generated once per product installation and stored only in the client app's local encrypted state.
 
+When a license or product policy requires machine binding, clients that can obtain a stable host identity must additionally send `machine_fingerprint` during activation, verification, and deactivation. The raw OS identifier must not be sent or persisted. This is a server-enforced binding signal, not hardware attestation; clients must fail closed if a bound installation cannot provide or match its fingerprint.
+
+### Platform business claims
+
+The multi-tenant MarketLens Platform uses `POST /licenses/redeem` to link an issued activation code to one external MarketLens business UUID. The request requires `activation_code` and `business_uuid`; `product_code` may be supplied and must match the authenticated API client's product. The operation is idempotent for the same business, rejects a different business claiming the same license, and rejects a second license claim for the same product/business pair. It does not create a `LicenseActivation` or consume `max_activations`; Business Server installations continue to use the device activation flow separately.
+
+### Platform installation grants
+
+After a business claim, the MarketLens Platform uses `POST /licenses/installation-grants` with its product-level API credential to issue a grant bound to `license_uuid`, `business_uuid`, `branch_uuid`, `device_uuid`, and a stable `installation_uuid`. Each issued grant reserves one `max_server_installations` slot. An identical retry returns the same grant and credential; changing any bound identity is rejected. `POST /licenses/installation-grants/{grant_uuid}/rotate` invalidates and replaces the bearer credential, while `POST /licenses/installation-grants/{grant_uuid}/revoke` invalidates it and releases the reserved slot. KernelBridge stores a credential hash and an encrypted copy for idempotent delivery; the plaintext credential is returned only by issue/rotation responses and must be stored by the Platform only long enough to deliver it to the Server.
+
+The current `KernelBridgeLicenseClient` still uses `license_key` on its device activation/verification endpoints and does not yet consume installation-grant credentials. Do not pass the owner's master activation code to a Business Server or configure this grant as a product-wide token. The grant-authenticated Server activation and verification client flow is a required follow-up before these grants are used for production enforcement.
+
 ## Local State
 
 Each client stores exactly one local state record per product code. The storage backend is framework-specific, but the logical fields are shared:
@@ -44,6 +56,7 @@ Each client stores exactly one local state record per product code. The storage 
 | --- | --- | --- |
 | `product_code` | yes | Uppercase product code |
 | `installation_identifier` | yes | Stable UUID or secure random identifier |
+| `machine_fingerprint` | when host identity is supported or server policy requires it | Domain-separated hash; never the raw OS identifier |
 | `license_identifier` | after activation | Public KernelBridge license UUID |
 | `subscription_identifier` | after activation | Public KernelBridge subscription UUID |
 | `activation_identifier` | after activation | Public activation UUID |
@@ -58,6 +71,8 @@ Each client stores exactly one local state record per product code. The storage 
 | `last_error_code` | optional | Last explicit central rejection code |
 
 Local state must not contain central database IDs. Use public UUIDs only.
+
+When the API provides a server-signed entitlement snapshot, clients must verify it with a pinned public key and bind it to the product code, public license and subscription UUIDs, status, expiry, and exact entitlement map before using the snapshot offline. A key identifier must be present for verification-key rotation. The local cache signature and the server signature are separate protections; clients must not treat an unsigned entitlement map as server-authenticated.
 
 ## Activation Flow
 
@@ -187,6 +202,7 @@ Every client package must include tests for:
 - explicit central rejection invalidates local access;
 - deactivation invalidates local access;
 - local entitlement tamper fails closed;
+- a copied cache on a different machine fails closed when machine binding is enabled;
 - sensitive config tamper requires re-activation;
 - protected route/page redirects or returns `402` before activation;
 - active, feature, and limit guards use cached decisions;

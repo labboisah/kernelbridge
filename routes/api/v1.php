@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\V1\DemoModeController;
 use App\Http\Controllers\Api\V1\HealthController;
+use App\Http\Controllers\Api\V1\InstallationVerificationController;
 use App\Http\Controllers\Api\V1\McpController;
 use App\Http\Controllers\Api\V1\ProductIntegrationController;
 use App\Http\Resources\Api\V1\UserResource;
@@ -11,8 +12,15 @@ use Illuminate\Support\Facades\Route;
 Route::get('/health', HealthController::class)->name('health');
 Route::middleware('auth:sanctum')->get('/user', fn (Request $request): UserResource => new UserResource($request->user()))->name('user');
 
+// Authenticated by the installation grant bearer, not a product API client.
+Route::middleware(['api.request_id', 'api.security', 'throttle:60,1'])->post('/installations/verify', [InstallationVerificationController::class, 'verify'])->name('installations.verify');
+
 Route::middleware(['api.request_id', 'api.security', 'api.log', 'api.client', 'api.rate_limit'])->group(function (): void {
     Route::get('/products/{code}', [ProductIntegrationController::class, 'product'])->name('products.show');
+    Route::post('/licenses/redeem', [ProductIntegrationController::class, 'redeem'])->name('licenses.redeem');
+    Route::post('/licenses/installation-grants', [ProductIntegrationController::class, 'issueInstallationGrant'])->name('licenses.installation-grants.issue');
+    Route::post('/licenses/installation-grants/{grant}/rotate', [ProductIntegrationController::class, 'rotateInstallationGrant'])->name('licenses.installation-grants.rotate');
+    Route::post('/licenses/installation-grants/{grant}/revoke', [ProductIntegrationController::class, 'revokeInstallationGrant'])->name('licenses.installation-grants.revoke');
     Route::post('/licenses/activate', [ProductIntegrationController::class, 'activate'])->name('licenses.activate');
     Route::post('/licenses/verify', [ProductIntegrationController::class, 'verify'])->name('licenses.verify');
     Route::post('/licenses/deactivate', [ProductIntegrationController::class, 'deactivate'])->name('licenses.deactivate');

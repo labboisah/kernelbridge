@@ -60,6 +60,52 @@ paths:
                     client_version: { type: string }
                     platform_url: { type: string, format: uri }
       responses: { '201': { description: Activated }, '422': { description: Invalid license } }
+  /licenses/redeem:
+    post:
+      summary: Claim a license for one external business without activating a device
+      description: Idempotent for the same business UUID. A license and a product business can each have only one claim. This does not create a device activation or consume an activation slot.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [activation_code, business_uuid]
+              properties:
+                activation_code: { type: string }
+                business_uuid: { type: string, format: uuid }
+                product_code: { type: string }
+      responses: { '200': { description: Business claim returned }, '403': { description: Product mismatch }, '422': { description: Invalid license or conflicting claim } }
+  /licenses/installation-grants:
+    post:
+      summary: Issue or retrieve an idempotent credential for one claimed business installation
+      description: Requires a product-level API credential. The license must be active and claimed by business_uuid. The installation is bound to business_uuid, branch_uuid, device_uuid, and installation_uuid. Issued grants reserve one max_server_installations slot until revoked or expired.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [license_uuid, business_uuid, branch_uuid, device_uuid, installation_uuid]
+              properties:
+                license_uuid: { type: string, format: uuid }
+                business_uuid: { type: string, format: uuid }
+                branch_uuid: { type: string, format: uuid }
+                device_uuid: { type: string, format: uuid }
+                installation_uuid: { type: string, format: uuid }
+      responses: { '201': { description: Grant issued }, '200': { description: Existing grant returned for an idempotent retry }, '403': { description: Product credential is not authorized }, '422': { description: License claim or installation limit rejected } }
+  /licenses/installation-grants/{grant_uuid}/rotate:
+    post:
+      summary: Rotate an active installation-grant credential
+      parameters:
+        - { name: grant_uuid, in: path, required: true, schema: { type: string, format: uuid } }
+      responses: { '200': { description: New credential returned; previous credential is invalid }, '404': { description: Grant not found }, '422': { description: Grant is expired or revoked } }
+  /licenses/installation-grants/{grant_uuid}/revoke:
+    post:
+      summary: Revoke an installation grant and release its reserved slot
+      parameters:
+        - { name: grant_uuid, in: path, required: true, schema: { type: string, format: uuid } }
+      responses: { '200': { description: Grant revoked }, '404': { description: Grant not found } }
   /licenses/verify:
     post:
       summary: Verify an active device license

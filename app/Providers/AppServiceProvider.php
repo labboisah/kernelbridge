@@ -13,12 +13,15 @@ use App\Models\ApiClient;
 use App\Models\ApiClientCredential;
 use App\Models\Customer;
 use App\Models\Invoice;
+use App\Models\LicenseInstallationGrant;
 use App\Models\Payment;
 use App\Models\Plan;
 use App\Models\Product;
 use App\Models\Quotation;
 use App\Models\SoftwareLicense;
 use App\Models\Subscription;
+use App\Models\SubscriptionEntitlement;
+use App\Observers\ProductWebhookObserver;
 use Illuminate\Auth\Events\Failed;
 use Illuminate\Auth\Events\Login;
 use Illuminate\Auth\Events\Logout;
@@ -63,6 +66,9 @@ class AppServiceProvider extends ServiceProvider
         app(BusinessLifecycleNotifications::class)->register();
         foreach ([Customer::class, Product::class, Plan::class, Quotation::class, Invoice::class, Payment::class, Subscription::class, SoftwareLicense::class, ApiClient::class, ApiClientCredential::class, Role::class, Permission::class] as $model) {
             $model::observe(SecurityAuditObserver::class);
+        }
+        foreach ([Subscription::class, SubscriptionEntitlement::class, SoftwareLicense::class, LicenseInstallationGrant::class] as $model) {
+            $model::observe(ProductWebhookObserver::class);
         }
         Event::listen(Login::class, fn (Login $event) => app(AuditRecorder::class)->record('authentication.login', $event->user, ['guard' => $event->guard], $event->user));
         Event::listen(Logout::class, fn (Logout $event) => app(AuditRecorder::class)->record('authentication.logout', $event->user, ['guard' => $event->guard], $event->user));

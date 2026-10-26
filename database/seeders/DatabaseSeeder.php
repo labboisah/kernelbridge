@@ -16,6 +16,7 @@ class DatabaseSeeder extends Seeder
             ProductSeeder::class,
             DemoProfileSeeder::class,
             PlanSeeder::class,
+            MarketLensPlanSeeder::class,
             EdunexaModuleSeeder::class,
             MediFlowPackageSeeder::class,
             SupportTeamSeeder::class,

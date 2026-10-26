@@ -16,12 +16,20 @@ export function licensingOptionsFromEnv(environment: NodeJS.ProcessEnv = process
     renewalNoticeEnabled: environment.KERNELBRIDGE_RENEWAL_NOTICE_ENABLED !== 'false',
     renewalNoticeThresholdMonths: parseMonthThresholds(environment.KERNELBRIDGE_RENEWAL_NOTICE_MONTHS),
     requireSignedEntitlements: environment.KERNELBRIDGE_REQUIRE_SIGNED_ENTITLEMENTS === 'true',
+    deploymentProfileMode: profileMode(environment.KERNELBRIDGE_DEPLOYMENT_PROFILE_MODE),
   };
 
   if (environment.KERNELBRIDGE_CACHE_SIGNING_KEY) options.cacheSigningKey = environment.KERNELBRIDGE_CACHE_SIGNING_KEY;
   if (environment.KERNELBRIDGE_APP_KEY) options.appKey = environment.KERNELBRIDGE_APP_KEY;
+  if (environment.KERNELBRIDGE_TOKEN_PROVIDER_FINGERPRINT) options.tokenProviderFingerprint = environment.KERNELBRIDGE_TOKEN_PROVIDER_FINGERPRINT;
 
   return options;
+}
+
+function profileMode(value: string | undefined): NonNullable<LicensingClientOptions['deploymentProfileMode']> {
+  if (!value || value === 'compatibility') return 'compatibility';
+  if (value === 'strict' || value === 'disabled') return value;
+  throw new TypeError('KERNELBRIDGE_DEPLOYMENT_PROFILE_MODE must be compatibility, strict, or disabled.');
 }
 
 function positive(value: string | undefined, fallback: number): number {

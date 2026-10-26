@@ -21,6 +21,7 @@ final class LicenseController extends Controller
             'hasUsableLicense' => $cache->hasUsableLicense(),
             'activationReason' => $cache->activationRequirementReason(),
             'activationMessage' => $cache->activationRequirementMessage(),
+            'licenseStatus' => $cache->status(),
             'productCode' => config('kernelbridge-licensing.product_code'),
         ]);
     }
