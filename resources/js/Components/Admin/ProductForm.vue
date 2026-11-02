@@ -7,7 +7,7 @@ const featureRows = props.product?.feature_records?.length
     ? props.product.feature_records.map(({ name, description, icon, is_active }) => ({ name, description: description || '', icon: icon || '', is_active }))
     : (props.product?.features || []).map((name) => ({ name, description: '', icon: '', is_active: true }));
 const form = useForm({
-    name: props.product?.name || '', code: props.product?.code || '', slug: props.product?.slug || '', category: props.product?.category || '', industry: props.product?.industry || '', tagline: props.product?.tagline || '', hero_description: props.product?.hero_description || '', short_description: props.product?.short_description || '', description: props.product?.description || '', icon: props.product?.icon || '', logo: props.product?.logo || '', cover_image: props.product?.cover_image || '', demo_url: props.product?.demo_url || '', website_url: props.product?.website_url || '', status: props.product?.status || 'draft', is_featured: props.product?.is_featured || false, sort_order: props.product?.sort_order || 0, metadata: props.product?.metadata || {}, seo_title: props.product?.seo_title || '', seo_description: props.product?.seo_description || '', features: featureRows,
+    name: props.product?.name || '', code: props.product?.code || '', slug: props.product?.slug || '', category: props.product?.category || '', industry: props.product?.industry || '', tagline: props.product?.tagline || '', hero_description: props.product?.hero_description || '', short_description: props.product?.short_description || '', description: props.product?.description || '', icon: props.product?.icon || '', logo: props.product?.logo || '', cover_image: props.product?.cover_image || '', demo_url: props.product?.demo_url || '', website_url: props.product?.website_url || '', status: props.product?.status || 'draft', licensing_mode: props.product?.licensing_mode || 'legacy', licensing_mode_reason: '', runtime_type: props.product?.runtime_type || 'unknown', licensing_policy_revision: props.product?.licensing_policy_revision || 1, is_featured: props.product?.is_featured || false, sort_order: props.product?.sort_order || 0, metadata: props.product?.metadata || {}, seo_title: props.product?.seo_title || '', seo_description: props.product?.seo_description || '', features: featureRows,
     media: (props.product?.media || []).map(({ type, title, url, alt_text, is_active }) => ({ type, title: title || '', url, alt_text: alt_text || '', is_active })),
     links: (props.product?.links || []).map(({ type, label, url, is_active }) => ({ type, label, url, is_active })),
 });
@@ -19,6 +19,39 @@ const submit = () => props.product ? form.put(route('admin.products.update', pro
         <div class="form-grid">
             <label>Name<input v-model="form.name" required /><InputError :message="form.errors.name" /></label><label>Code<input v-model="form.code" required class="uppercase" /><InputError :message="form.errors.code" /></label><label>Slug<input v-model="form.slug" required /><InputError :message="form.errors.slug" /></label><label>Category<input v-model="form.category" required /><InputError :message="form.errors.category" /></label><label>Industry<input v-model="form.industry" required /><InputError :message="form.errors.industry" /></label><label>Status<select v-model="form.status"><option value="draft">Draft</option><option value="active">Active</option><option value="inactive">Inactive</option><option value="archived">Archived</option></select><InputError :message="form.errors.status" /></label><label>Sort order<input v-model.number="form.sort_order" type="number" min="0" /><InputError :message="form.errors.sort_order" /></label><label>Icon key<input v-model="form.icon" /><InputError :message="form.errors.icon" /></label><label>Logo path or URL<input v-model="form.logo" /><InputError :message="form.errors.logo" /></label><label>Cover image path or URL<input v-model="form.cover_image" /><InputError :message="form.errors.cover_image" /></label><label>Demo URL<input v-model="form.demo_url" type="url" /><InputError :message="form.errors.demo_url" /></label><label>Product URL<input v-model="form.website_url" type="url" /><InputError :message="form.errors.website_url" /></label>
         </div>
+        <section class="space-y-4 rounded-xl border border-cyan-200 bg-cyan-50 p-5">
+            <div>
+                <h2 class="text-xl font-bold text-slate-900">Licensing policy</h2>
+                <p class="text-sm text-slate-600">KernelBridge controls this product policy. Changes are audited; existing activations and grants remain valid. Deploy a compatible product SDK before switching to Direct; it blocks new legacy-key activations.</p>
+                <p class="text-sm text-amber-800">Platform-account ownership verification is not available yet. Do not select that mode for a new rollout.</p>
+            </div>
+            <div class="form-grid">
+                <label>Licensing model
+                    <select v-model="form.licensing_mode">
+                        <option value="legacy">Legacy compatibility</option>
+                        <option value="direct">Direct installation codes</option>
+                        <option value="platform_account">Product platform account</option>
+                        <option value="hybrid">Hybrid transition</option>
+                    </select>
+                    <InputError :message="form.errors.licensing_mode" />
+                </label>
+                <label>Product runtime
+                    <select v-model="form.runtime_type">
+                        <option value="unknown">Not set</option>
+                        <option value="laravel">Laravel web/server</option>
+                        <option value="typescript_desktop">TypeScript desktop</option>
+                        <option value="browser">Browser application</option>
+                        <option value="other">Other</option>
+                    </select>
+                    <InputError :message="form.errors.runtime_type" />
+                </label>
+            </div>
+            <label v-if="(product && form.licensing_mode !== product.licensing_mode) || (!product && form.licensing_mode !== 'legacy')">Reason for licensing policy change
+                <textarea v-model="form.licensing_mode_reason" rows="2" required />
+                <InputError :message="form.errors.licensing_mode_reason" />
+            </label>
+            <p v-if="product" class="text-xs text-slate-500">Policy revision {{ form.licensing_policy_revision }}. Runtime type does not determine licensing model.</p>
+        </section>
         <label class="flex items-center gap-3"><input v-model="form.is_featured" type="checkbox" class="!mt-0 rounded border-slate-300 text-[#0797A5]" />Featured on public website</label>
         <label>Card description<input v-model="form.short_description" required /><InputError :message="form.errors.short_description" /></label><label>Headline<input v-model="form.tagline" required /><InputError :message="form.errors.tagline" /></label><label>Hero supporting copy<textarea v-model="form.hero_description" rows="3" /><InputError :message="form.errors.hero_description" /></label><label>Full description<textarea v-model="form.description" required rows="6" /><InputError :message="form.errors.description" /></label>
 

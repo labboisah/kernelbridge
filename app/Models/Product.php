@@ -14,7 +14,7 @@ final class Product extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['uuid', 'public_id', 'code', 'name', 'slug', 'tagline', 'hero_description', 'short_description', 'description', 'category', 'seo_title', 'seo_description', 'industry', 'icon', 'logo', 'cover_image', 'features', 'benefits', 'workflow', 'platform_components', 'screenshots', 'plans', 'demo_url', 'website_url', 'is_featured', 'metadata', 'sort_order', 'status'];
+    protected $fillable = ['uuid', 'public_id', 'code', 'name', 'slug', 'tagline', 'hero_description', 'short_description', 'description', 'category', 'seo_title', 'seo_description', 'industry', 'icon', 'logo', 'cover_image', 'features', 'benefits', 'workflow', 'platform_components', 'screenshots', 'plans', 'demo_url', 'website_url', 'is_featured', 'metadata', 'sort_order', 'status', 'licensing_mode', 'runtime_type', 'licensing_policy_revision', 'licensing_mode_changed_at'];
 
     protected static function booted(): void
     {
@@ -26,7 +26,7 @@ final class Product extends Model
 
     protected function casts(): array
     {
-        return ['vat_commission_rate' => 'decimal:2', 'developer_commission_rate' => 'decimal:2', 'platform_commission_rate' => 'decimal:2', 'staff_commission_rate' => 'decimal:2', 'partner_commission_rate' => 'decimal:2', 'features' => 'array', 'benefits' => 'array', 'workflow' => 'array', 'platform_components' => 'array', 'screenshots' => 'array', 'plans' => 'array', 'metadata' => 'array', 'is_featured' => 'boolean', 'status' => ProductStatus::class];
+        return ['vat_commission_rate' => 'decimal:2', 'developer_commission_rate' => 'decimal:2', 'platform_commission_rate' => 'decimal:2', 'staff_commission_rate' => 'decimal:2', 'partner_commission_rate' => 'decimal:2', 'features' => 'array', 'benefits' => 'array', 'workflow' => 'array', 'platform_components' => 'array', 'screenshots' => 'array', 'plans' => 'array', 'metadata' => 'array', 'is_featured' => 'boolean', 'status' => ProductStatus::class, 'licensing_mode_changed_at' => 'datetime'];
     }
 
     public function scopePublished(Builder $query): Builder

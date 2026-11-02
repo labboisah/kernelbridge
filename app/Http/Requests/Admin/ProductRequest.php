@@ -14,6 +14,8 @@ abstract class ProductRequest extends FormRequest
     public function rules(): array
     {
         $product = $this->route('product');
+        $licensingModeChanged = $this->has('licensing_mode')
+            && ($product?->licensing_mode ?? 'legacy') !== $this->input('licensing_mode');
 
         return [
             'name' => ['required', 'string', 'max:120'],
@@ -31,6 +33,9 @@ abstract class ProductRequest extends FormRequest
             'demo_url' => ['nullable', 'url:http,https', 'max:2048'],
             'website_url' => ['nullable', 'url:http,https', 'max:2048'],
             'status' => ['required', Rule::enum(ProductStatus::class)],
+            'licensing_mode' => ['sometimes', 'string', Rule::in(['legacy', 'direct', 'platform_account', 'hybrid'])],
+            'licensing_mode_reason' => [Rule::requiredIf($licensingModeChanged), 'nullable', 'string', 'max:1000'],
+            'runtime_type' => ['sometimes', 'string', Rule::in(['unknown', 'laravel', 'typescript_desktop', 'browser', 'other'])],
             'is_featured' => ['required', 'boolean'],
             'sort_order' => ['required', 'integer', 'min:0', 'max:65535'],
             'metadata' => ['nullable', 'array'],

@@ -36,11 +36,17 @@ final class ProductManagementTest extends TestCase
 
         $payload = $this->payload();
         $payload['name'] = 'Bridge CRM Pro';
+        $payload['licensing_mode'] = 'direct';
+        $payload['licensing_mode_reason'] = 'Enable one-time activation codes for this product.';
+        $payload['runtime_type'] = 'laravel';
         $payload['features'] = [['name' => 'Pipeline management', 'description' => null, 'icon' => null, 'is_active' => true]];
         $this->actingAs($admin)->put(route('admin.products.update', $product), $payload)->assertRedirect(route('admin.products.show', $product));
         $this->assertDatabaseHas('products', ['id' => $product->id, 'name' => 'Bridge CRM Pro']);
+        $this->assertDatabaseHas('products', ['id' => $product->id, 'licensing_mode' => 'direct', 'runtime_type' => 'laravel', 'licensing_policy_revision' => 2]);
+        $this->assertNotNull($product->fresh()->licensing_mode_changed_at);
         $this->assertDatabaseHas('product_features', ['product_id' => $product->id, 'name' => 'Pipeline management']);
         $this->assertDatabaseHas('audit_logs', ['event' => 'product.updated', 'actor_id' => $admin->id]);
+        $this->assertDatabaseHas('audit_logs', ['event' => 'product.licensing_policy.updated', 'actor_id' => $admin->id]);
 
         $this->actingAs($admin)->delete(route('admin.products.destroy', $product))->assertRedirect(route('admin.products.index'));
         $this->assertDatabaseMissing('products', ['id' => $product->id]);
@@ -78,6 +84,16 @@ final class ProductManagementTest extends TestCase
         $payload['status'] = 'published';
 
         $this->actingAs($admin)->post(route('admin.products.store'), $payload)->assertSessionHasErrors(['code', 'slug', 'status']);
+    }
+
+    public function test_non_legacy_licensing_policy_requires_a_reason(): void
+    {
+        $payload = $this->payload();
+        $payload['licensing_mode'] = 'direct';
+
+        $this->actingAs($this->administrator())
+            ->post(route('admin.products.store'), $payload)
+            ->assertSessionHasErrors('licensing_mode_reason');
     }
 
     private function administrator(): User

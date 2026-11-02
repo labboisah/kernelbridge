@@ -40,7 +40,7 @@ const revoke = credential => {
 </script>
 
 <template>
-    <Head title="MCP Operators" />
+    <Head title="Integration API Credentials" />
     <PortalLayout area="Administration">
         <template #navigation><AdminNavigation active="mcp" /></template>
 
@@ -49,8 +49,8 @@ const revoke = credential => {
         <div class="flex flex-wrap items-start justify-between gap-4">
             <div>
                 <p class="text-sm font-semibold uppercase tracking-wider text-cyan-700">Assistant operations</p>
-                <h1 class="mt-2 text-3xl font-bold">MCP Operators</h1>
-                <p class="mt-2 max-w-3xl text-slate-600">Create scoped assistant tokens, rotate credentials, and review KernelBridge MCP tool activity.</p>
+                <h1 class="mt-2 text-3xl font-bold">Integration API Credentials</h1>
+                <p class="mt-2 max-w-3xl text-slate-600">Create scoped product and assistant credentials, rotate them, and review KernelBridge MCP activity.</p>
             </div>
             <div class="rounded-xl bg-[#071927] px-5 py-4 text-white shadow-sm">
                 <p class="text-xs uppercase tracking-[.16em] text-cyan-200">Endpoint</p>
@@ -76,7 +76,7 @@ const revoke = credential => {
 
         <div class="mt-7 grid gap-6 xl:grid-cols-[420px_1fr]">
             <section class="rounded-2xl bg-white p-6 shadow-sm">
-                <h2 class="text-xl font-bold">Issue MCP token</h2>
+                <h2 class="text-xl font-bold">Issue integration token</h2>
                 <form class="mt-5 space-y-4" @submit.prevent="submitClient">
                     <label class="block text-sm font-semibold">Product<select v-model="clientForm.product_uuid" class="mt-1 w-full rounded-xl border-slate-300"><option v-for="product in products" :key="product.uuid" :value="product.uuid">{{ product.name }} ({{ product.code }})</option></select><InputError :message="clientForm.errors.product_uuid" /></label>
                     <label class="block text-sm font-semibold">Preset<select v-model="clientForm.preset" class="mt-1 w-full rounded-xl border-slate-300"><option v-for="key in presetKeys" :key="key" :value="key">{{ presets[key].label }}</option></select><InputError :message="clientForm.errors.preset" /></label>
@@ -92,12 +92,12 @@ const revoke = credential => {
             <section class="space-y-5">
                 <article v-for="client in clients" :key="client.uuid" class="rounded-2xl bg-white p-6 shadow-sm">
                     <div class="flex flex-wrap justify-between gap-3">
-                        <div><h2 class="text-xl font-bold">{{ client.name }}</h2><p class="text-sm text-slate-500">{{ client.product?.name }} · {{ client.rate_limit_per_minute }}/minute</p></div>
+                        <div><h2 class="text-xl font-bold">{{ client.name }}</h2><p class="text-sm text-slate-500">{{ client.product?.name }} ï¿½ {{ client.rate_limit_per_minute }}/minute</p></div>
                         <div class="flex flex-wrap gap-2"><span v-for="scope in client.scopes" :key="scope" class="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-700">{{ scope }}</span></div>
                     </div>
                     <div class="mt-4 overflow-x-auto"><table class="w-full text-left text-sm"><thead><tr class="border-b text-xs uppercase tracking-wider text-slate-500"><th class="py-2">Credential</th><th>Expires</th><th>Status</th><th class="text-right">Actions</th></tr></thead><tbody><tr v-for="credential in client.credentials" :key="credential.uuid" class="border-b last:border-0"><td class="py-3"><strong>{{ credential.name }}</strong><p class="font-mono text-xs text-slate-400">{{ credential.uuid }}</p></td><td>{{ credential.expires_at || 'Never' }}</td><td><span :class="credential.is_active ? 'text-emerald-700' : 'text-rose-700'" class="font-bold">{{ credential.is_active ? 'Active' : 'Inactive' }}</span></td><td class="py-3 text-right"><div class="flex flex-wrap justify-end gap-2"><input v-model="rotateForm(credential).name" class="w-44 rounded-lg border-slate-300 text-sm" /><input v-model="rotateForm(credential).expires_at" type="date" class="w-36 rounded-lg border-slate-300 text-sm" /><button class="rounded-lg bg-[#0B3D6E] px-3 py-2 text-xs font-bold text-white" @click="rotate(credential)">Rotate</button><button class="rounded-lg border border-rose-200 px-3 py-2 text-xs font-bold text-rose-700" @click="revoke(credential)">Revoke</button></div></td></tr></tbody></table></div>
                 </article>
-                <p v-if="!clients.length" class="rounded-2xl bg-white p-6 text-slate-500 shadow-sm">No MCP API clients have been issued yet.</p>
+                <p v-if="!clients.length" class="rounded-2xl bg-white p-6 text-slate-500 shadow-sm">No integration API clients have been issued yet.</p>
             </section>
         </div>
 

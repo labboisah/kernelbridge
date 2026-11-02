@@ -16,9 +16,23 @@ final readonly class ProductManager
     public function create(array $data, User $actor): Product
     {
         return DB::transaction(function () use ($data, $actor): Product {
-            $product = Product::query()->create($this->productAttributes($data));
+            $attributes = $this->productAttributes($data);
+            if (($attributes['licensing_mode'] ?? 'legacy') !== 'legacy') {
+                $attributes['licensing_mode_changed_at'] = now();
+            }
+            $product = Product::query()->create($attributes);
             $this->synchronizeRelations($product, $data);
             $this->audit->record('product.created', $actor, ['product_uuid' => $product->uuid, 'after' => $product->fresh()->toArray()]);
+            if (($data['licensing_mode'] ?? 'legacy') !== 'legacy') {
+                $this->audit->record('product.licensing_policy.created', $actor, [
+                    'product_uuid' => $product->uuid,
+                    'from' => null,
+                    'to' => $product->licensing_mode,
+                    'revision' => $product->licensing_policy_revision,
+                    'effective_at' => now()->toIso8601String(),
+                    'reason' => $data['licensing_mode_reason'] ?? null,
+                ]);
+            }
 
             return $product;
         });
@@ -28,10 +42,29 @@ final readonly class ProductManager
     public function update(Product $product, array $data, User $actor): Product
     {
         return DB::transaction(function () use ($product, $data, $actor): Product {
+            $product = Product::query()->lockForUpdate()->findOrFail($product->id);
             $before = $product->load(['productFeatures', 'media', 'links'])->toArray();
-            $product->update($this->productAttributes($data));
+            $attributes = $this->productAttributes($data);
+            $previousMode = $product->licensing_mode;
+            $modeChanged = isset($attributes['licensing_mode']) && $attributes['licensing_mode'] !== $previousMode;
+            if ($modeChanged) {
+                $attributes['licensing_policy_revision'] = $product->licensing_policy_revision + 1;
+                $attributes['licensing_mode_changed_at'] = now();
+            }
+            $product->update($attributes);
             $this->synchronizeRelations($product, $data);
-            $this->audit->record('product.updated', $actor, ['product_uuid' => $product->uuid, 'before' => $before, 'after' => $product->fresh()->load(['productFeatures', 'media', 'links'])->toArray()]);
+            $after = $product->fresh()->load(['productFeatures', 'media', 'links'])->toArray();
+            $this->audit->record('product.updated', $actor, ['product_uuid' => $product->uuid, 'before' => $before, 'after' => $after]);
+            if ($modeChanged) {
+                $this->audit->record('product.licensing_policy.updated', $actor, [
+                    'product_uuid' => $product->uuid,
+                    'from' => $previousMode,
+                    'to' => $product->licensing_mode,
+                    'revision' => $product->licensing_policy_revision,
+                    'effective_at' => now()->toIso8601String(),
+                    'reason' => $data['licensing_mode_reason'] ?? null,
+                ]);
+            }
 
             return $product;
         });
@@ -51,7 +84,7 @@ final readonly class ProductManager
      */
     private function productAttributes(array $data): array
     {
-        $attributes = Arr::except($data, ['features', 'media', 'links']);
+        $attributes = Arr::except($data, ['features', 'media', 'links', 'licensing_mode_reason']);
         $attributes['features'] = collect($data['features'] ?? [])->pluck('name')->values()->all();
         $attributes['screenshots'] = collect($data['media'] ?? [])->where('type', 'screenshot')->pluck('url')->values()->all();
 

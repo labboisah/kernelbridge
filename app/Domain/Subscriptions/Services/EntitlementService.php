@@ -10,7 +10,10 @@ final class EntitlementService
     public function snapshot(Subscription $subscription, Plan $plan): void
     {
         $now = now();
-        $subscription->entitlements()->whereNull('effective_until')->update(['effective_until' => $now]);
+        $subscription->entitlements()
+            ->where(fn ($query) => $query->whereNull('effective_until')->orWhere('effective_until', '>', $now))
+            ->get()
+            ->each(fn ($entitlement) => $entitlement->update(['effective_until' => $now]));
         if (is_array($modules = data_get($subscription->metadata, 'licensed_modules'))) {
             foreach ($modules as $module) {
                 $subscription->entitlements()->create(['feature_key' => $module, 'feature_name' => config('mediflow.modules.'.$module, $module), 'enabled' => true, 'limit_value' => null, 'source_plan_id' => $plan->id, 'effective_from' => $now]);
@@ -33,7 +36,11 @@ final class EntitlementService
             return false;
         }
 
-        return (bool) $subscription->entitlements()->where('feature_key', $featureKey)->whereNull('effective_until')->value('enabled');
+        return (bool) $subscription->entitlements()
+            ->where('feature_key', $featureKey)
+            ->where(fn ($query) => $query->whereNull('effective_from')->orWhere('effective_from', '<=', now()))
+            ->where(fn ($query) => $query->whereNull('effective_until')->orWhere('effective_until', '>', now()))
+            ->value('enabled');
     }
 
     public function limit(Subscription $subscription, string $featureKey): int|float|string|null
@@ -41,7 +48,11 @@ final class EntitlementService
         if (! $this->contains($subscription, $featureKey)) {
             return null;
         }
-        $value = $subscription->entitlements()->where('feature_key', $featureKey)->whereNull('effective_until')->value('limit_value');
+        $value = $subscription->entitlements()
+            ->where('feature_key', $featureKey)
+            ->where(fn ($query) => $query->whereNull('effective_from')->orWhere('effective_from', '<=', now()))
+            ->where(fn ($query) => $query->whereNull('effective_until')->orWhere('effective_until', '>', now()))
+            ->value('limit_value');
 
         return is_numeric($value) ? $value + 0 : $value;
     }

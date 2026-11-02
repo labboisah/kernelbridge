@@ -42,8 +42,23 @@ final class SoftwareLicense extends Model
         return $this->hasMany(LicenseActivation::class);
     }
 
+    public function activationCodes(): HasMany
+    {
+        return $this->hasMany(LicenseActivationCode::class);
+    }
+
+    public function installations(): HasMany
+    {
+        return $this->hasMany(LicenseInstallation::class);
+    }
+
     public function businessClaim(): HasOne
     {
         return $this->hasOne(LicenseBusinessClaim::class);
+    }
+
+    public function platformAccountLinks(): HasMany
+    {
+        return $this->hasMany(LicensePlatformAccountLink::class);
     }
 }

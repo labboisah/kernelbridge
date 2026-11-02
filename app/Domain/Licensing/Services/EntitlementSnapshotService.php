@@ -8,11 +8,16 @@ use Illuminate\Support\Collection;
 
 final class EntitlementSnapshotService
 {
+    public function __construct(private readonly EntitlementRevisionService $revisions) {}
+
     /** @return Collection<int, array{key: string, name: string, enabled: bool, limit: mixed}> */
     public function items(Subscription $subscription): Collection
     {
+        $subscription = $this->refreshRevision($subscription);
+        $now = now();
         $items = $subscription->entitlements()
-            ->whereNull('effective_until')
+            ->where(fn ($query) => $query->whereNull('effective_from')->orWhere('effective_from', '<=', $now))
+            ->where(fn ($query) => $query->whereNull('effective_until')->orWhere('effective_until', '>', $now))
             ->orderBy('feature_key')
             ->get()
             ->map(fn ($e): array => ['key' => $e->feature_key, 'name' => $e->feature_name, 'enabled' => $e->enabled, 'limit' => $e->limit_value])
@@ -28,5 +33,10 @@ final class EntitlementSnapshotService
         }
 
         return $items;
+    }
+
+    public function refreshRevision(Subscription $subscription): Subscription
+    {
+        return $this->revisions->refresh($subscription);
     }
 }

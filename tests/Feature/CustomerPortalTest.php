@@ -5,10 +5,15 @@ namespace Tests\Feature;
 use App\Enums\UserRole;
 use App\Models\Customer;
 use App\Models\Invoice;
+use App\Models\LicenseActivationCode;
+use App\Models\LicenseInstallation;
+use App\Models\LicensePlatformAccountLink;
 use App\Models\Payment;
 use App\Models\Plan;
+use App\Models\Product;
 use App\Models\SoftwareLicense;
 use App\Models\Subscription;
+use App\Models\SubscriptionEntitlement;
 use App\Models\SupportTicket;
 use App\Models\User;
 use Database\Seeders\PlanSeeder;
@@ -17,6 +22,7 @@ use Database\Seeders\RoleAndPermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
@@ -101,6 +107,66 @@ final class CustomerPortalTest extends TestCase
             ->where('services.0.client_setup.license_key', fn (?string $key): bool => is_string($key) && str_starts_with($key, 'KBT-')));
     }
 
+    public function test_direct_license_issues_a_one_time_installation_code_without_showing_the_legacy_key(): void
+    {
+        [$user, $customer] = $this->account('activation@example.com', 'KBT-CUS-000050');
+        $plan = Plan::query()->where('slug', 'basic')->firstOrFail();
+        $product = Product::query()->findOrFail($plan->product_id);
+        $product->forceFill(['licensing_mode' => 'direct'])->save();
+        $subscription = Subscription::factory()->create([
+            'customer_id' => $customer->id,
+            'product_id' => $product->id,
+            'plan_id' => $plan->id,
+            'status' => 'active',
+            'starts_at' => now()->subDay(),
+            'ends_at' => now()->addMonth(),
+            'created_by' => $user->id,
+        ]);
+        $license = app(\App\Domain\Licensing\Services\LicenseService::class)->issue($subscription)['license'];
+        SubscriptionEntitlement::query()->create([
+            'subscription_id' => $subscription->id,
+            'feature_key' => 'max_server_installations',
+            'feature_name' => 'Installations',
+            'enabled' => true,
+            'limit_value' => '2',
+            'source_plan_id' => $plan->id,
+            'effective_from' => now()->subDay(),
+        ]);
+        LicenseActivationCode::query()->create([
+            'software_license_id' => $license->id,
+            'product_id' => $product->id,
+            'code_lookup' => hash_hmac('sha256', 'EXPIRED-CODE', (string) config('app.key')),
+            'code_hash' => Hash::make('EXPIRED-CODE'),
+            'status' => 'issued',
+            'expires_at' => now()->subHour(),
+        ]);
+
+        $this->actingAs($user)->get(route('portal.licenses.index'))->assertOk()->assertInertia(fn (Assert $page) => $page
+            ->component('Customer/Licenses/Index')
+            ->where('licenses.0.licensing_mode', 'direct')
+            ->where('licenses.0.license_key', null)
+            ->where('licenses.0.uuid', $license->uuid)
+            ->where('licenses.0.activation_codes.0.status', 'expired'));
+
+        $response = $this->from(route('portal.licenses.index'))->post(route('portal.licenses.activation-codes.issue', $license->uuid));
+        $response->assertRedirect(route('portal.licenses.index'));
+        $activationCode = session('activation_code');
+
+        $this->assertIsArray($activationCode);
+        $this->assertSame($license->uuid, $activationCode['license_uuid']);
+        $this->assertStringStartsWith('KBI-', $activationCode['code']);
+        $storedCode = LicenseActivationCode::query()
+            ->where('code_lookup', hash_hmac('sha256', $activationCode['code'], (string) config('app.key')))
+            ->firstOrFail();
+        $this->assertSame('issued', $storedCode->status);
+        $this->assertTrue(Hash::check($activationCode['code'], $storedCode->code_hash));
+        $this->assertSame($user->id, $storedCode->issued_by);
+        $this->assertDatabaseHas('audit_logs', [
+            'event' => 'license.activation_code.issued',
+            'actor_id' => $user->id,
+        ]);
+    }
+
     public function test_customer_can_submit_payment_evidence_for_own_account(): void
     {
         Storage::fake('public');
@@ -116,6 +182,127 @@ final class CustomerPortalTest extends TestCase
         $this->assertSame($customer->id, $payment->customer_id);
         $this->assertSame('pending', $payment->status->value);
         Storage::disk('public')->assertExists($payment->proof_of_payment);
+    }
+
+    public function test_customer_can_revoke_its_unified_installation_and_release_the_seat(): void
+    {
+        [$user, $customer] = $this->account('installation-owner@example.com', 'KBT-CUS-000031');
+        $product = Product::factory()->create(['code' => 'DIRECT']);
+        $plan = Plan::factory()->create(['product_id' => $product->id, 'slug' => 'installation-revocation']);
+        $subscription = Subscription::factory()->create([
+            'customer_id' => $customer->id,
+            'product_id' => $product->id,
+            'plan_id' => $plan->id,
+            'status' => 'active',
+            'created_by' => $user->id,
+        ]);
+        $license = SoftwareLicense::factory()->create([
+            'subscription_id' => $subscription->id,
+            'customer_id' => $customer->id,
+            'product_id' => $product->id,
+            'status' => 'active',
+        ]);
+        $installation = LicenseInstallation::query()->create([
+            'software_license_id' => $license->id,
+            'product_id' => $product->id,
+            'installation_uuid' => (string) \Illuminate\Support\Str::uuid(),
+            'credential_hash' => hash('sha256', 'installation-secret'),
+            'status' => 'active',
+            'activated_at' => now(),
+        ]);
+
+        $this->actingAs($user)
+            ->post(route('portal.licenses.installations.revoke', $installation->uuid))
+            ->assertRedirect();
+
+        $this->assertSame('revoked', $installation->fresh()->status);
+        $this->assertNotNull($installation->fresh()->revoked_at);
+        $this->assertSame(0, app(\App\Domain\Licensing\Services\InstallationSeatAllocator::class)->used($license));
+        $this->assertDatabaseHas('audit_logs', [
+            'event' => 'license.installation.revoked',
+            'actor_id' => $user->id,
+            'entity_type' => LicenseInstallation::class,
+        ]);
+
+        [$otherUser] = $this->account('other-installation-owner@example.com', 'KBT-CUS-000032');
+        $this->actingAs($otherUser)
+            ->post(route('portal.licenses.installations.revoke', $installation->uuid))
+            ->assertForbidden();
+    }
+
+    public function test_primary_customer_can_unlink_a_platform_account_and_revoke_its_installations(): void
+    {
+        [$user, $customer] = $this->account('platform-link-owner@example.com', 'KBT-CUS-000033');
+        $product = Product::factory()->create(['code' => 'PLATFORM']);
+        $plan = Plan::factory()->create(['product_id' => $product->id, 'slug' => 'platform-link-revocation']);
+        $subscription = Subscription::factory()->create([
+            'customer_id' => $customer->id,
+            'product_id' => $product->id,
+            'plan_id' => $plan->id,
+            'status' => 'active',
+            'created_by' => $user->id,
+        ]);
+        $license = SoftwareLicense::factory()->create([
+            'subscription_id' => $subscription->id,
+            'customer_id' => $customer->id,
+            'product_id' => $product->id,
+            'status' => 'active',
+        ]);
+        $link = LicensePlatformAccountLink::query()->create([
+            'software_license_id' => $license->id,
+            'product_id' => $product->id,
+            'business_uuid' => (string) \Illuminate\Support\Str::uuid(),
+            'status' => 'approved',
+            'approved_by_user_id' => $user->id,
+            'approved_at' => now(),
+        ]);
+        $installation = LicenseInstallation::query()->create([
+            'software_license_id' => $license->id,
+            'product_id' => $product->id,
+            'license_platform_account_link_id' => $link->id,
+            'installation_uuid' => (string) \Illuminate\Support\Str::uuid(),
+            'business_uuid' => $link->business_uuid,
+            'credential_hash' => hash('sha256', 'linked-installation-secret'),
+            'credential_encrypted' => encrypt('linked-installation-secret'),
+            'status' => 'active',
+            'activated_at' => now(),
+        ]);
+        $code = LicenseActivationCode::query()->create([
+            'software_license_id' => $license->id,
+            'product_id' => $product->id,
+            'license_platform_account_link_id' => $link->id,
+            'bound_installation_uuid' => (string) \Illuminate\Support\Str::uuid(),
+            'code_lookup' => hash('sha256', 'unused-platform-code'),
+            'code_hash' => hash('sha256', 'unused-platform-code'),
+            'status' => 'issued',
+            'expires_at' => now()->addHours(12),
+        ]);
+
+        $nonPrimaryUser = User::factory()->create(['email' => 'platform-link-member@example.com']);
+        $nonPrimaryUser->assignRole(UserRole::Customer->value);
+        $customer->users()->attach($nonPrimaryUser->id, ['is_primary' => false]);
+
+        $this->actingAs($nonPrimaryUser)
+            ->post(route('portal.platform-account-links.revoke', $link->uuid))
+            ->assertForbidden();
+
+        $this->actingAs($user)
+            ->post(route('portal.platform-account-links.revoke', $link->uuid))
+            ->assertRedirect();
+
+        $this->assertSame('revoked', $link->fresh()->status);
+        $this->assertNotNull($link->fresh()->revoked_at);
+        $this->assertSame('revoked', $installation->fresh()->status);
+        $this->assertNotNull($installation->fresh()->revoked_at);
+        $this->assertNull($installation->fresh()->credential_encrypted);
+        $this->assertSame('revoked', $code->fresh()->status);
+        $this->assertNotNull($code->fresh()->revoked_at);
+        $this->assertSame(0, app(\App\Domain\Licensing\Services\InstallationSeatAllocator::class)->used($license));
+        $this->assertDatabaseHas('audit_logs', [
+            'event' => 'license.platform_account_link.revoked',
+            'actor_id' => $user->id,
+            'entity_type' => LicensePlatformAccountLink::class,
+        ]);
     }
 
     public function test_customer_can_create_update_suspend_and_cancel_services_without_hard_deletion(): void

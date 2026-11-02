@@ -5,6 +5,9 @@ namespace App\Http\Controllers\Customer;
 use App\Domain\Finance\Services\CustomerCreditService;
 use App\Domain\Finance\Services\InvoiceManager;
 use App\Domain\Finance\Services\PaymentManager;
+use App\Domain\Licensing\Services\InstallationActivationService;
+use App\Domain\Licensing\Services\PlatformAccountLinkService;
+use App\Domain\Licensing\Exceptions\PlatformAccountLinkException;
 use App\Domain\Licensing\Services\LicenseService;
 use App\Domain\Licensing\Services\PackageCatalog;
 use App\Domain\Licensing\Services\PackageChangeService;
@@ -21,6 +24,8 @@ use App\Models\Customer;
 use App\Models\CustomerCreditEntry;
 use App\Models\Invoice;
 use App\Models\LicenseActivation;
+use App\Models\LicenseInstallation;
+use App\Models\LicensePlatformAccountLink;
 use App\Models\Payment;
 use App\Models\Plan;
 use App\Models\SoftwareLicense;
@@ -119,6 +124,58 @@ final class PortalController extends Controller
         return back()->with('success', $message);
     }
 
+    public function approvePlatformAccountLink(Request $request, LicensePlatformAccountLink $link, PlatformAccountLinkService $links): RedirectResponse
+    {
+        abort_unless($request->user()->customers()
+            ->whereKey($link->license()->value('customer_id'))
+            ->wherePivot('is_primary', true)
+            ->exists(), 403);
+
+        try {
+            $links->approve($link, $request->user());
+        } catch (PlatformAccountLinkException $exception) {
+            throw ValidationException::withMessages(['platform_account_link' => $exception->getMessage()]);
+        }
+
+        return back()->with('success', 'Product platform account linked to this license.');
+    }
+
+    public function rejectPlatformAccountLink(Request $request, LicensePlatformAccountLink $link, PlatformAccountLinkService $links): RedirectResponse
+    {
+        abort_unless($request->user()->customers()
+            ->whereKey($link->license()->value('customer_id'))
+            ->wherePivot('is_primary', true)
+            ->exists(), 403);
+
+        try {
+            $links->reject($link, $request->user());
+        } catch (PlatformAccountLinkException $exception) {
+            throw ValidationException::withMessages(['platform_account_link' => $exception->getMessage()]);
+        }
+
+        return back()->with('success', 'Product platform account-link request rejected.');
+    }
+
+    public function revokePlatformAccountLink(Request $request, LicensePlatformAccountLink $link, PlatformAccountLinkService $links): RedirectResponse
+    {
+        abort_unless($request->user()->customers()
+            ->whereKey($link->license()->value('customer_id'))
+            ->wherePivot('is_primary', true)
+            ->exists(), 403);
+
+        try {
+            $result = $links->revoke($link, $request->user());
+        } catch (PlatformAccountLinkException $exception) {
+            throw ValidationException::withMessages(['platform_account_link' => $exception->getMessage()]);
+        }
+
+        $message = $result['installations_revoked'] > 0
+            ? 'Platform account unlinked. Its installations were revoked and their seats released.'
+            : 'Platform account unlinked. Any unused activation codes were revoked.';
+
+        return back()->with('success', $message);
+    }
+
     public function suspendService(TransitionServiceRequest $request, Subscription $subscription, SubscriptionService $service): RedirectResponse
     {
         $this->ownedSubscription($request, $subscription);
@@ -138,7 +195,13 @@ final class PortalController extends Controller
     public function licenses(Request $request, LicenseService $service): Response
     {
         $licenses = SoftwareLicense::query()->whereIn('customer_id', $this->customerIds($request))
-            ->with(['subscription.product:id,name,code', 'activations' => fn ($query) => $query->latest('activated_at')])->latest()->get();
+            ->with([
+                'subscription.product:id,name,code,licensing_mode',
+                'activations' => fn ($query) => $query->latest('activated_at'),
+                'activationCodes' => fn ($query) => $query->latest(),
+                'installations' => fn ($query) => $query->latest('activated_at'),
+                'platformAccountLinks' => fn ($query) => $query->latest(),
+            ])->latest()->get();
 
         $edunexaPlans = Plan::query()->publiclyAvailable()->with('features')
             ->whereHas('product', fn ($q) => $q->where('code', 'EDUNEXA'))
@@ -206,12 +269,24 @@ final class PortalController extends Controller
 
         return Inertia::render('Customer/Licenses/Index', ['credits' => $credits, 'creditHistory' => $creditHistory, 'packages' => $packages, 'orders' => $orders, 'edunexaPlans' => $edunexaPlans, 'edunexaOrder' => $edunexaOrder, 'vatRate' => \App\Models\BillingSetting::vatRate(), 'licenses' => $licenses->map(fn (SoftwareLicense $license) => [
             'uuid' => $license->uuid, 'identifier' => 'KBT-LIC-'.strtoupper(substr(str_replace('-', '', $license->uuid), 0, 12)),
-            'license_key' => $service->key($license),
+            'licensing_mode' => $license->subscription?->product?->licensing_mode ?? 'legacy',
+            'license_key' => $license->subscription?->product?->licensing_mode === 'legacy' ? $service->key($license) : null,
             'packages' => data_get($license->subscription?->metadata, 'package_names', []),
             'device_bound' => (bool) data_get($license->subscription?->metadata, 'device_bound', false),
             'setup_url' => $license->subscription && ClientSetupBundle::where('subscription_id', $license->subscription->id)->exists() ? route('portal.services.environment', $license->subscription) : null,
             'status' => $license->status, 'product' => $license->subscription?->product?->name,
             'expires_at' => $license->expires_at?->toDateString(), 'max_activations' => $license->max_activations,
+            'activation_codes' => $license->activationCodes->map(fn ($code) => [
+                'uuid' => $code->uuid,
+                'status' => $code->status === 'issued' && $code->expires_at->isPast() ? 'expired' : $code->status,
+                'expires_at' => $code->expires_at?->toIso8601String(),
+            ]),
+            'installations' => $license->installations->map(fn ($installation) => [
+                'uuid' => $installation->uuid, 'device_name' => $installation->device_name ?: 'Unnamed installation',
+                'status' => $installation->status, 'activated_at' => $installation->activated_at?->toIso8601String(),
+                'last_verified_at' => $installation->last_verified_at?->toIso8601String(),
+                'can_revoke' => $installation->status === 'active',
+            ]),
             'activations' => $license->activations->map(fn (LicenseActivation $activation) => [
                 'uuid' => $activation->uuid, 'device_name' => $activation->device_name ?: 'Unnamed installation',
                 'status' => $activation->status, 'activated_at' => $activation->activated_at?->toIso8601String(),
@@ -219,7 +294,27 @@ final class PortalController extends Controller
                 'ip_address' => $activation->ip_address,
                 'device_info' => data_get($activation->metadata, 'device_info', []),
             ]),
+            'platform_account_links' => $license->platformAccountLinks->map(fn (LicensePlatformAccountLink $link) => [
+                'uuid' => $link->uuid,
+                'business_uuid' => $link->business_uuid,
+                'status' => $link->status,
+                'requested_at' => $link->created_at?->toIso8601String(),
+                'approved_at' => $link->approved_at?->toIso8601String(),
+            ]),
         ])]);
+    }
+
+    public function issueActivationCode(Request $request, SoftwareLicense $license, InstallationActivationService $activation): RedirectResponse
+    {
+        abort_unless($request->user()->customers()->whereKey($license->customer_id)->exists(), 403);
+        $data = $request->validate(['replace_code_uuid' => ['nullable', 'uuid']]);
+        $issued = $activation->issueCode($license, $request->user(), $data['replace_code_uuid'] ?? null);
+
+        return back()->with('activation_code', [
+            'license_uuid' => $license->uuid,
+            'code' => $issued['code'],
+            'expires_at' => $issued['activation_code']->expires_at->toIso8601String(),
+        ]);
     }
 
     public function deactivate(Request $request, LicenseActivation $activation): RedirectResponse
@@ -232,6 +327,19 @@ final class PortalController extends Controller
         $activation->update(['status' => 'deactivated', 'deactivated_at' => now()]);
 
         return back()->with('success', 'Installation deactivated successfully.');
+    }
+
+    public function revokeInstallation(Request $request, LicenseInstallation $installation, InstallationActivationService $activation): RedirectResponse
+    {
+        $installation->loadMissing('license');
+        abort_unless($request->user()->customers()->whereKey($installation->license->customer_id)->exists(), 403);
+
+        $result = $activation->revokeForCustomer($installation, $request->user());
+        $message = $result['status'] === 'revoked'
+            ? 'Installation revoked. Its seat is now available for another installation.'
+            : 'This installation is already inactive.';
+
+        return back()->with('success', $message);
     }
 
     public function invoices(Request $request): Response

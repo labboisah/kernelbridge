@@ -15,6 +15,8 @@ use Illuminate\Validation\ValidationException;
 
 final class LicenseService
 {
+    public function __construct(private readonly InstallationSeatAllocator $seats) {}
+
     public function claim(ApiClient $client, string $activationCode, string $businessUuid): array
     {
         return DB::transaction(function () use ($client, $activationCode, $businessUuid): array {
@@ -43,6 +45,17 @@ final class LicenseService
             }
 
             if (! $claim) {
+                if ($license->product->licensing_mode === 'direct') {
+                    throw ValidationException::withMessages([
+                        'activation_code' => 'This product is configured for direct installation-code licensing.',
+                    ]);
+                }
+                if ($license->product->licensing_mode === 'platform_account') {
+                    throw ValidationException::withMessages([
+                        'business_uuid' => 'Platform-account ownership verification is required before this license can be linked.',
+                    ]);
+                }
+
                 LicenseBusinessClaim::query()->create([
                     'software_license_id' => $license->id,
                     'product_id' => $client->product_id,
@@ -104,6 +117,12 @@ final class LicenseService
             $license = $this->resolve($client, $data['license_key'], true);
             $fingerprint = $this->fingerprint($data['device_id']);
             $activation = $license->activations()->where('device_fingerprint', $fingerprint)->first();
+            if ($activation?->status !== 'active' && in_array($license->product->licensing_mode, ['direct', 'platform_account'], true)) {
+                throw ValidationException::withMessages([
+                    'license_key' => 'New installations must use the activation flow configured for this product.',
+                ]);
+            }
+
             $bound = (bool) data_get($license->subscription->metadata, 'device_bound', false);
             if ($bound && empty($data['machine_fingerprint'])) {
                 throw ValidationException::withMessages(['machine_fingerprint' => 'A machine fingerprint is required to activate this licence. Update the licensing client.']);
@@ -114,8 +133,8 @@ final class LicenseService
             if ($activation) {
                 $this->assertMachine($activation, $data);
             }
-            if ($activation?->status !== 'active' && $license->activations()->where('status', 'active')->count() >= $license->max_activations) {
-                throw ValidationException::withMessages(['license_key' => 'Maximum activations reached.']);
+            if ($activation?->status !== 'active') {
+                $this->seats->assertAvailable($license, ['activation_id' => $activation?->id], 'license_key');
             }
             $metadata = $activation?->metadata ?? [];
             if (! empty($data['machine_fingerprint'])) {
@@ -181,7 +200,8 @@ final class LicenseService
 
     private function resolve(ApiClient $client, string $key, bool $lock = false): SoftwareLicense
     {
-        $license = SoftwareLicense::query()->with(['subscription', 'activations'])->where('product_id', $client->product_id)->when($client->subscription_id, fn ($q) => $q->where('subscription_id', $client->subscription_id))->where('key_lookup', $this->lookup($key))->when($lock, fn ($q) => $q->lockForUpdate())->first();
+        $key = strtoupper(trim($key));
+        $license = SoftwareLicense::query()->with(['subscription', 'activations', 'product'])->where('product_id', $client->product_id)->when($client->subscription_id, fn ($q) => $q->where('subscription_id', $client->subscription_id))->where('key_lookup', $this->lookup($key))->when($lock, fn ($q) => $q->lockForUpdate())->first();
         if (! $license || ! Hash::check($key, $license->key_hash) || $license->status !== 'active' || ($license->expires_at && $license->expires_at->isPast()) || ($license->subscription->starts_at?->isFuture()) || ($license->subscription->ends_at?->isPast() && ! ($license->subscription->status->value === 'grace' && $license->subscription->grace_ends_at?->isFuture())) || ! in_array($license->subscription->status->value, ['trial', 'active', 'grace'], true)) {
             throw ValidationException::withMessages(['license_key' => 'License is invalid or inactive.']);
         }

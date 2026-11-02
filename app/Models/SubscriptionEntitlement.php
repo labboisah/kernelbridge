@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 final class SubscriptionEntitlement extends Model
@@ -23,6 +24,21 @@ final class SubscriptionEntitlement extends Model
     protected static function booted(): void
     {
         self::creating(fn (self $model) => $model->uuid ??= (string) Str::uuid());
+        self::created(fn (self $model) => self::bumpRevision($model->subscription_id));
+        self::updated(function (self $model): void {
+            if ($model->wasChanged(['feature_key', 'feature_name', 'enabled', 'limit_value', 'effective_from', 'effective_until'])) {
+                self::bumpRevision($model->subscription_id);
+            }
+        });
+        self::deleted(fn (self $model) => self::bumpRevision($model->subscription_id));
+    }
+
+    private static function bumpRevision(int $subscriptionId): void
+    {
+        DB::table('subscriptions')->where('id', $subscriptionId)->update([
+            'entitlement_revision' => DB::raw('entitlement_revision + 1'),
+            'entitlement_revision_checked_at' => now(),
+        ]);
     }
 
     protected function casts(): array

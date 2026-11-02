@@ -37,6 +37,11 @@ final class McpController extends Controller
             'description' => 'Use local MCP documentation tools without platform customer or license access.',
             'scopes' => ['mcp:docs'],
         ],
+        'platform_account' => [
+            'label' => 'Platform licensing integration',
+            'description' => 'Allow the trusted product backend to request customer-approved account links and installation codes.',
+            'scopes' => ['licensing:account-link'],
+        ],
     ];
 
     public function index(Request $request): Response
@@ -53,7 +58,7 @@ final class McpController extends Controller
             ->with(['product:id,uuid,name,code', 'credentials' => fn ($query) => $query->latest()])
             ->latest()
             ->get()
-            ->filter(fn (ApiClient $client) => $this->isMcpClient($client))
+            ->filter(fn (ApiClient $client) => $this->isManagedClient($client))
             ->values()
             ->map(fn (ApiClient $client) => [
                 'uuid' => $client->uuid,
@@ -140,7 +145,7 @@ final class McpController extends Controller
 
     public function rotateCredential(Request $request, ApiClientCredential $credential, ApiCredentialService $credentials): RedirectResponse
     {
-        abort_unless($this->isMcpClient($credential->client), 404);
+        abort_unless($this->isManagedClient($credential->client), 404);
         $data = $request->validate(['name' => ['required', 'string', 'max:255'], 'expires_at' => ['nullable', 'date']]);
         $issued = $credentials->rotate($credential, $data['name'], $request->user(), $this->expiresAt($data['expires_at'] ?? null));
 
@@ -149,15 +154,15 @@ final class McpController extends Controller
 
     public function revokeCredential(Request $request, ApiClientCredential $credential, ApiCredentialService $credentials): RedirectResponse
     {
-        abort_unless($this->isMcpClient($credential->client), 404);
+        abort_unless($this->isManagedClient($credential->client), 404);
         $credentials->revoke($credential, $request->user());
 
         return back()->with('success', 'MCP credential revoked.');
     }
 
-    private function isMcpClient(ApiClient $client): bool
+    private function isManagedClient(ApiClient $client): bool
     {
-        return collect($client->scopes ?? [])->contains(fn (string $scope) => str_starts_with($scope, 'mcp:'));
+        return collect($client->scopes ?? [])->contains(fn (string $scope) => str_starts_with($scope, 'mcp:') || $scope === 'licensing:account-link');
     }
 
     private function parseAllowedIps(string $value): ?array
@@ -172,4 +177,3 @@ final class McpController extends Controller
         return $value ? CarbonImmutable::parse($value)->endOfDay() : null;
     }
 }
-

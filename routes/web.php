@@ -109,6 +109,11 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
         Route::post('/licenses/purchase', [LicensePurchaseController::class, 'store'])->middleware('throttle:10,1')->name('licenses.purchase');
         Route::post('/licenses/edunexa/purchase', [LicensePurchaseController::class, 'purchaseEdunexa'])->middleware('throttle:10,1')->name('licenses.edunexa.purchase');
         Route::get('/licenses', [CustomerPortalController::class, 'licenses'])->name('licenses.index');
+        Route::post('/licenses/{license:uuid}/activation-codes', [CustomerPortalController::class, 'issueActivationCode'])->name('licenses.activation-codes.issue');
+        Route::post('/license-installations/{installation:uuid}/revoke', [CustomerPortalController::class, 'revokeInstallation'])->name('licenses.installations.revoke');
+        Route::post('/platform-account-links/{link:uuid}/approve', [CustomerPortalController::class, 'approvePlatformAccountLink'])->name('platform-account-links.approve');
+        Route::post('/platform-account-links/{link:uuid}/reject', [CustomerPortalController::class, 'rejectPlatformAccountLink'])->name('platform-account-links.reject');
+        Route::post('/platform-account-links/{link:uuid}/revoke', [CustomerPortalController::class, 'revokePlatformAccountLink'])->name('platform-account-links.revoke');
         Route::post('/license-activations/{activation:uuid}/deactivate', [CustomerPortalController::class, 'deactivate'])->name('licenses.activations.deactivate');
         Route::get('/invoices', [CustomerPortalController::class, 'invoices'])->name('invoices.index');
         Route::get('/invoices/{invoice:uuid}', [CustomerPortalController::class, 'showInvoice'])->name('invoices.show');

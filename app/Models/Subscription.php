@@ -24,7 +24,7 @@ final class Subscription extends Model
 
     protected function casts(): array
     {
-        return ['status' => SubscriptionStatus::class, 'billing_cycle' => BillingCycle::class, 'starts_at' => 'datetime', 'ends_at' => 'datetime', 'trial_ends_at' => 'datetime', 'grace_ends_at' => 'datetime', 'auto_renew' => 'boolean', 'price' => 'decimal:2', 'metadata' => 'array', 'renewal_notice_sent_at' => 'datetime'];
+        return ['status' => SubscriptionStatus::class, 'billing_cycle' => BillingCycle::class, 'starts_at' => 'datetime', 'ends_at' => 'datetime', 'trial_ends_at' => 'datetime', 'grace_ends_at' => 'datetime', 'auto_renew' => 'boolean', 'price' => 'decimal:2', 'metadata' => 'array', 'renewal_notice_sent_at' => 'datetime', 'entitlement_revision' => 'integer', 'entitlement_revision_checked_at' => 'datetime'];
     }
 
     public function getRouteKeyName(): string

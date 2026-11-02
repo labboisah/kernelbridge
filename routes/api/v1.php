@@ -2,8 +2,10 @@
 
 use App\Http\Controllers\Api\V1\DemoModeController;
 use App\Http\Controllers\Api\V1\HealthController;
+use App\Http\Controllers\Api\V1\InstallationActivationController;
 use App\Http\Controllers\Api\V1\InstallationVerificationController;
 use App\Http\Controllers\Api\V1\McpController;
+use App\Http\Controllers\Api\V1\PlatformAccountLinkController;
 use App\Http\Controllers\Api\V1\ProductIntegrationController;
 use App\Http\Resources\Api\V1\UserResource;
 use Illuminate\Http\Request;
@@ -12,10 +14,17 @@ use Illuminate\Support\Facades\Route;
 Route::get('/health', HealthController::class)->name('health');
 Route::middleware('auth:sanctum')->get('/user', fn (Request $request): UserResource => new UserResource($request->user()))->name('user');
 
-// Authenticated by the installation grant bearer, not a product API client.
+// Code exchange is public but rate-limited; verification accepts installation-scoped credentials.
+Route::middleware(['api.request_id', 'api.security', 'throttle:12,1'])->post('/installations/activate', [InstallationActivationController::class, 'activate'])->name('installations.activate');
+Route::middleware(['api.request_id', 'api.security', 'throttle:12,1'])->post('/installations/deactivate', [InstallationActivationController::class, 'deactivate'])->name('installations.deactivate');
 Route::middleware(['api.request_id', 'api.security', 'throttle:60,1'])->post('/installations/verify', [InstallationVerificationController::class, 'verify'])->name('installations.verify');
 
 Route::middleware(['api.request_id', 'api.security', 'api.log', 'api.client', 'api.rate_limit'])->group(function (): void {
+    Route::middleware('api.scope:licensing:account-link')->prefix('platform/account-links')->name('platform.account-links.')->group(function (): void {
+        Route::post('/requests', [PlatformAccountLinkController::class, 'request'])->name('requests.create');
+        Route::get('/{link}', [PlatformAccountLinkController::class, 'status'])->name('show');
+        Route::post('/{link}/activation-codes', [PlatformAccountLinkController::class, 'issueInstallationCode'])->name('activation-codes.issue');
+    });
     Route::get('/products/{code}', [ProductIntegrationController::class, 'product'])->name('products.show');
     Route::post('/licenses/redeem', [ProductIntegrationController::class, 'redeem'])->name('licenses.redeem');
     Route::post('/licenses/installation-grants', [ProductIntegrationController::class, 'issueInstallationGrant'])->name('licenses.installation-grants.issue');
@@ -45,4 +54,3 @@ Route::middleware(['api.request_id', 'api.security', 'api.log', 'api.client', 'a
         });
     });
 });
-

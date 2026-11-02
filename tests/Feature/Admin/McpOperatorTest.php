@@ -66,6 +66,35 @@ final class McpOperatorTest extends TestCase
         $this->assertSame(['127.0.0.1', '10.0.0.5'], $client->allowed_ips);
     }
 
+    public function test_admin_can_create_and_manage_a_platform_account_licensing_client(): void
+    {
+        $admin = $this->admin();
+        $product = Product::query()->where('code', 'ALIGNEX')->firstOrFail();
+
+        $this->actingAs($admin)->post(route('admin.mcp.clients.store'), [
+            'product_uuid' => $product->uuid,
+            'preset' => 'platform_account',
+            'name' => 'AlignEx platform licensing',
+            'credential_name' => 'platform backend',
+            'rate_limit_per_minute' => 60,
+        ])->assertRedirect()->assertSessionHas('mcp_token');
+
+        $client = \App\Models\ApiClient::query()
+            ->where('product_id', $product->id)
+            ->where('name', 'AlignEx platform licensing')
+            ->firstOrFail();
+
+        $this->assertSame(['licensing:account-link'], $client->scopes);
+
+        $this->get(route('admin.mcp.index'))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Admin/Mcp/Index')
+                ->where('clients.0.name', 'AlignEx platform licensing')
+                ->where('clients.0.scopes.0', 'licensing:account-link')
+            );
+    }
+
     public function test_admin_can_rotate_and_revoke_mcp_credentials(): void
     {
         $admin = $this->admin();
@@ -144,6 +173,5 @@ final class McpOperatorTest extends TestCase
         return Subscription::query()->create(['customer_id' => $customer->id, 'product_id' => $plan->product_id, 'plan_id' => $plan->id, 'subscription_number' => 'KBT-SUB-MCP001', 'status' => 'active', 'starts_at' => now(), 'ends_at' => now()->addYear(), 'auto_renew' => true, 'price' => $plan->price, 'currency' => $plan->currency, 'billing_cycle' => $plan->billing_cycle, 'created_by' => $this->admin()->id]);
     }
 }
-
 
 

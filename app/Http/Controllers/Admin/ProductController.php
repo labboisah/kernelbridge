@@ -48,7 +48,12 @@ final class ProductController extends Controller
     {
         $this->authorize('update', $product);
 
-        return Inertia::render('Admin/Products/Edit', ['product' => (new ProductResource($product->load(['productFeatures', 'media', 'links'])))->resolve()]);
+        $data = (new ProductResource($product->load(['productFeatures', 'media', 'links'])))->resolve();
+        $data['licensing_mode'] = $product->licensing_mode;
+        $data['runtime_type'] = $product->runtime_type;
+        $data['licensing_policy_revision'] = $product->licensing_policy_revision;
+
+        return Inertia::render('Admin/Products/Edit', ['product' => $data]);
     }
 
     public function update(UpdateProductRequest $request, Product $product, ProductManager $manager): RedirectResponse

@@ -18,6 +18,7 @@ final class LicenseInstallationGrant extends Model
         'device_uuid',
         'installation_uuid',
         'credential_hash',
+        'credential_key_id',
         'credential_encrypted',
         'status',
         'expires_at',

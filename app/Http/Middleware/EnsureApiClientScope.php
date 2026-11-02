@@ -16,7 +16,7 @@ final class EnsureApiClientScope
 
         $allowed = collect($scopes)->contains(fn (string $scope): bool => $clientScopes->contains($scope) || $clientScopes->contains($this->wildcard($scope)));
         if (! $allowed) {
-            return ApiResponse::error($request, 'insufficient_scope', 'This API credential is not allowed to use this MCP operation.', 403, ['required_scopes' => $scopes]);
+            return ApiResponse::error($request, 'insufficient_scope', 'This API credential is not allowed to perform this operation.', 403, ['required_scopes' => $scopes]);
         }
 
         return $next($request);

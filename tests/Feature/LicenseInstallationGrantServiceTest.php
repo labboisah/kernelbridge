@@ -6,6 +6,7 @@ use App\Domain\Licensing\Services\LicenseInstallationGrantService;
 use App\Models\ApiClient;
 use App\Models\Customer;
 use App\Models\LicenseBusinessClaim;
+use App\Models\LicenseInstallationGrant;
 use App\Models\Plan;
 use App\Models\Product;
 use App\Models\SoftwareLicense;
@@ -38,6 +39,7 @@ final class LicenseInstallationGrantServiceTest extends TestCase
         $installationUuid = (string) Str::uuid();
 
         $product = Product::factory()->create(['code' => 'ALIGNEX']);
+        $product->forceFill(['licensing_mode' => 'hybrid'])->save();
         $client = ApiClient::query()->create([
             'uuid' => (string) Str::uuid(),
             'product_id' => $product->id,
@@ -106,6 +108,45 @@ final class LicenseInstallationGrantServiceTest extends TestCase
         $this->assertSame($installationUuid, $result['grant']['installation_uuid']);
         $this->assertNotSame('', $result['credential']);
         $this->assertMatchesRegularExpression('/^[^\s]+\.[^\s]+$/', $result['credential']);
+
+        $grant = LicenseInstallationGrant::query()->where('uuid', $result['grant']['grant_uuid'])->firstOrFail();
+        $grant->forceFill(['credential_key_id' => null])->save();
+        config([
+            'product_integration.credential_hmac.active_key_id' => 'current',
+            'product_integration.credential_hmac.keys' => [
+                'legacy-app-key' => (string) config('app.key'),
+                'current' => 'current-licensing-hmac-key-material',
+            ],
+        ]);
+        $this->assertTrue($this->service->credentialMatches($grant, explode('.', $result['credential'], 2)[1]));
+
+        $product->forceFill(['licensing_mode' => 'platform_account'])->save();
+        try {
+            $this->service->issue($client, [
+                'license_uuid' => $license->uuid,
+                'business_uuid' => $businessUuid,
+                'branch_uuid' => (string) Str::uuid(),
+                'device_uuid' => (string) Str::uuid(),
+                'installation_uuid' => (string) Str::uuid(),
+            ]);
+            $this->fail('Platform-account mode must issue new installations through approved bound activation codes.');
+        } catch (ValidationException $exception) {
+            $this->assertStringContainsString('configured installation-code activation flow', $exception->getMessage());
+        }
+
+        $product->forceFill(['licensing_mode' => 'direct'])->save();
+        try {
+            $this->service->issue($client, [
+                'license_uuid' => $license->uuid,
+                'business_uuid' => $businessUuid,
+                'branch_uuid' => (string) Str::uuid(),
+                'device_uuid' => (string) Str::uuid(),
+                'installation_uuid' => (string) Str::uuid(),
+            ]);
+            $this->fail('Direct mode must reject new platform installation grants.');
+        } catch (ValidationException $exception) {
+            $this->assertStringContainsString('configured installation-code activation flow', $exception->getMessage());
+        }
     }
 
     public function test_it_rejects_a_second_installation_when_the_limit_has_been_reached(): void
@@ -167,7 +208,7 @@ final class LicenseInstallationGrantServiceTest extends TestCase
         ]);
 
         $this->expectException(ValidationException::class);
-        $this->expectExceptionMessage('The Business Server installation limit has been reached for this license.');
+        $this->expectExceptionMessage('The shared installation limit has been reached for this license.');
 
         $this->service->issue($client, [
             'license_uuid' => $license->uuid,

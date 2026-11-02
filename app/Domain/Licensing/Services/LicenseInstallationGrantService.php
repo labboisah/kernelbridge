@@ -2,7 +2,6 @@
 
 namespace App\Domain\Licensing\Services;
 
-use App\Domain\Subscriptions\Services\PlanEntitlementService;
 use App\Models\ApiClient;
 use App\Models\LicenseBusinessClaim;
 use App\Models\LicenseInstallationGrant;
@@ -14,6 +13,11 @@ use Illuminate\Validation\ValidationException;
 
 final class LicenseInstallationGrantService
 {
+    public function __construct(
+        private readonly InstallationSeatAllocator $seats,
+        private readonly LicenseSecretHasher $secretHasher,
+    ) {}
+
     /**
      * @param  array{license_uuid: string, business_uuid: string, branch_uuid: string, device_uuid: string, installation_uuid: string}  $data
      * @return array{grant: array<string, mixed>, credential: string, created: bool}
@@ -73,8 +77,10 @@ final class LicenseInstallationGrantService
 
                 if ($existing->expires_at?->isPast()) {
                     $secret = Str::random(64);
+                    $digest = $this->secretHasher->hash($secret);
                     $existing->forceFill([
-                        'credential_hash' => $this->digest($secret),
+                        'credential_hash' => $digest['hash'],
+                        'credential_key_id' => $digest['key_id'],
                         'credential_encrypted' => Crypt::encryptString($secret),
                         'status' => 'issued',
                         'expires_at' => $license->expires_at,
@@ -94,21 +100,16 @@ final class LicenseInstallationGrantService
                 ];
             }
 
-            $limit = $this->installationLimit($license);
-            $reserved = LicenseInstallationGrant::query()
-                ->where('software_license_id', $license->id)
-                ->whereIn('status', ['issued', 'active'])
-                ->where(fn ($query) => $query->whereNull('expires_at')->orWhere('expires_at', '>', now()))
-                ->count();
-            $existingActivations = $license->activations()->where('status', 'active')->count();
-
-            if ($reserved + $existingActivations >= $limit) {
+            if (in_array($license->product->licensing_mode, ['direct', 'platform_account'], true)) {
                 throw ValidationException::withMessages([
-                    'license_uuid' => 'The Business Server installation limit has been reached for this license.',
+                    'license_uuid' => 'This product requires its configured installation-code activation flow for new installations.',
                 ]);
             }
 
+            $this->seats->assertAvailable($license, [], 'license_uuid');
+
             $secret = Str::random(64);
+            $digest = $this->secretHasher->hash($secret);
             $grant = LicenseInstallationGrant::query()->create([
                 'software_license_id' => $license->id,
                 'product_id' => $client->product_id,
@@ -117,7 +118,8 @@ final class LicenseInstallationGrantService
                 'branch_uuid' => $data['branch_uuid'],
                 'device_uuid' => $data['device_uuid'],
                 'installation_uuid' => $data['installation_uuid'],
-                'credential_hash' => $this->digest($secret),
+                'credential_hash' => $digest['hash'],
+                'credential_key_id' => $digest['key_id'],
                 'credential_encrypted' => Crypt::encryptString($secret),
                 'status' => 'issued',
                 'expires_at' => $license->expires_at,
@@ -147,8 +149,10 @@ final class LicenseInstallationGrantService
             }
 
             $secret = Str::random(64);
+            $digest = $this->secretHasher->hash($secret);
             $grant->forceFill([
-                'credential_hash' => $this->digest($secret),
+                'credential_hash' => $digest['hash'],
+                'credential_key_id' => $digest['key_id'],
                 'credential_encrypted' => Crypt::encryptString($secret),
             ])->save();
 
@@ -219,7 +223,12 @@ final class LicenseInstallationGrantService
 
     public function digest(string $secret): string
     {
-        return hash_hmac('sha256', $secret, (string) config('app.key'));
+        return $this->secretHasher->hash($secret)['hash'];
+    }
+
+    public function credentialMatches(LicenseInstallationGrant $grant, string $secret): bool
+    {
+        return $this->secretHasher->matches($secret, (string) $grant->credential_hash, $grant->credential_key_id);
     }
 
     private function hasSameBinding(LicenseInstallationGrant $grant, SoftwareLicense $license, array $data): bool
@@ -245,22 +254,4 @@ final class LicenseInstallationGrantService
             && in_array($status, ['trial', 'active', 'grace'], true);
     }
 
-    private function installationLimit(SoftwareLicense $license): int
-    {
-        $entitlement = $license->subscription->entitlements
-            ->first(fn ($entitlement): bool => $entitlement->feature_key === 'max_server_installations'
-                && $entitlement->effective_until === null
-                && (! $entitlement->effective_from || $entitlement->effective_from->isPast()));
-        $limit = $entitlement
-            ? ($entitlement->enabled ? $entitlement->limit_value : null)
-            : app(PlanEntitlementService::class)->limit($license->subscription->plan, 'max_server_installations');
-
-        if (! is_numeric($limit) || (int) $limit < 1) {
-            throw ValidationException::withMessages([
-                'license_uuid' => 'The license has no valid max_server_installations entitlement.',
-            ]);
-        }
-
-        return (int) $limit;
-    }
 }
