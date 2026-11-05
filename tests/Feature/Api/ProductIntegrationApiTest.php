@@ -42,6 +42,37 @@ final class ProductIntegrationApiTest extends TestCase
         $this->assertDatabaseHas('api_request_logs', ['api_client_id' => $client->id, 'status_code' => 200]);
     }
 
+    public function test_public_licensing_policy_is_signed_and_contains_the_effective_product_mode(): void
+    {
+        $product = Product::query()->where('code', 'ALIGNEX')->firstOrFail();
+        $product->forceFill([
+            'licensing_mode' => 'hybrid',
+            'licensing_policy_revision' => 7,
+            'licensing_mode_changed_at' => now(),
+        ])->save();
+        $keyPair = sodium_crypto_sign_keypair();
+        config([
+            'product_integration.signing.secret_key' => base64_encode(sodium_crypto_sign_secretkey($keyPair)),
+            'product_integration.signing.key_id' => 'test-key',
+        ]);
+
+        $response = $this->getJson('/api/v1/licensing/products/ALIGNEX/policy')
+            ->assertOk()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('data.algorithm', 'ed25519')
+            ->assertJsonPath('data.key_id', 'test-key');
+
+        $signed = $response->json('data');
+        self::assertTrue(sodium_crypto_sign_verify_detached(
+            base64_decode($signed['signature'], true),
+            $signed['payload_json'],
+            sodium_crypto_sign_publickey($keyPair),
+        ));
+        self::assertSame('ALIGNEX', json_decode($signed['payload_json'], true, 512, JSON_THROW_ON_ERROR)['product_code']);
+        self::assertSame('hybrid', json_decode($signed['payload_json'], true, 512, JSON_THROW_ON_ERROR)['licensing_mode']);
+        self::assertSame(7, json_decode($signed['payload_json'], true, 512, JSON_THROW_ON_ERROR)['licensing_policy_revision']);
+    }
+
     public function test_product_credentials_are_isolated_and_validation_errors_are_consistent(): void
     {
         [, $token] = $this->credential();
@@ -51,8 +82,8 @@ final class ProductIntegrationApiTest extends TestCase
 
     public function test_license_activation_verification_and_deactivation_flow(): void
     {
-        [, $token] = $this->credential();
         $subscription = $this->subscription();
+        [, $token] = $this->credential($subscription->product->code);
         $issued = app(LicenseService::class)->issue($subscription, 1);
         $payload = ['license_key' => $issued['license_key'], 'device_id' => 'server-fingerprint-1', 'device_name' => 'ABC Production'];
         $activation = $this->withToken($token)->postJson('/api/v1/licenses/activate', $payload)->assertCreated()->assertJsonPath('data.status', 'active')->json('data');
@@ -61,6 +92,21 @@ final class ProductIntegrationApiTest extends TestCase
         $this->withToken($token)->postJson('/api/v1/licenses/verify', $payload)->assertOk()->assertJsonPath('data.activation_uuid', $activation['activation_uuid']);
         $this->withToken($token)->postJson('/api/v1/licenses/deactivate', $payload)->assertOk()->assertJsonPath('data.status', 'deactivated');
         $this->withToken($token)->postJson('/api/v1/licenses/verify', $payload)->assertUnprocessable()->assertJsonPath('error.code', 'validation_failed');
+    }
+
+    public function test_license_activation_accepts_case_and_whitespace_variations_of_issued_code(): void
+    {
+        $subscription = $this->subscription();
+        [, $token] = $this->credential($subscription->product->code);
+        $issued = app(LicenseService::class)->issue($subscription, 1);
+        $payload = [
+            'license_key' => '  '.strtolower($issued['license_key'])." \t",
+            'device_id' => 'server-fingerprint-1',
+        ];
+
+        $this->withToken($token)->postJson('/api/v1/licenses/activate', $payload)
+            ->assertCreated()
+            ->assertJsonPath('data.status', 'active');
     }
 
     public function test_license_redemption_claims_a_business_without_consuming_an_installation(): void
@@ -218,9 +264,9 @@ final class ProductIntegrationApiTest extends TestCase
         $this->withToken($limited['token'])->getJson('/api/v1/products/ALIGNEX')->assertStatus(429)->assertJsonPath('error.code', 'rate_limit_exceeded');
     }
 
-    private function credential(): array
+    private function credential(string $productCode = 'ALIGNEX'): array
     {
-        $product = Product::query()->where('code', 'ALIGNEX')->firstOrFail();
+        $product = Product::query()->where('code', $productCode)->firstOrFail();
         $service = app(ApiCredentialService::class);
         $client = $service->createClient($product, 'AlignEx integration');
         $issued = $service->issue($client, 'test');

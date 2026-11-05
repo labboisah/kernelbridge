@@ -1,7 +1,7 @@
 # Licensing SDK Repository and Improvement Plan
 
 - **Status:** Planned; implementation not started
-- **Repository layout:** One SDK monorepo containing both runtime packages and the shared protocol contract
+- **Repository layout:** One extensible SDK monorepo containing the Laravel package, the TypeScript SDK, any future supported runtime packages, and the shared protocol contract
 - **Canonical repository:** [labboisah/kernelbridge-license](https://github.com/labboisah/kernelbridge-license)
 - **Authority:** KernelBridge owns licensing policy and the API contract; the SDK repository owns runtime client implementations and activation UX.
 
@@ -11,23 +11,75 @@ A product team registers its product and runtime in KernelBridge and installs th
 
 The packages must not choose a product's licensing mode, issue activation codes, or replace KernelBridge policy. They implement the published KernelBridge protocol and consume signed policy/entitlement responses.
 
-The activation screen is a required package feature, not an optional product-built form. It runs in the product and is visibly KernelBridge-branded, using the official KernelBridge logo, colors, typography, and visual design. Product branding cannot replace or white-label KernelBridge identity on licensing and activation screens. The screen presents the activation journey permitted by KernelBridge's current mode: an installation-code flow for Direct, a product-platform sign-in/link flow for Platform Account, or both only when KernelBridge explicitly configures Hybrid. The platform-account screen integrates with the product's existing authentication and trusted backend broker; it never embeds backend credentials or treats sign-in alone as license approval.
+The activation screen is a required package feature, not an optional product-built form. It runs in the product and is visibly KernelBridge-branded, using the official KernelBridge logo, colors, typography, and visual design. Product branding cannot replace or white-label KernelBridge identity on licensing and activation screens. The screen presents the activation journey permitted by KernelBridge's current mode: an installation-code flow for Direct, a product-platform sign-in/link flow for Platform Account, or both only when KernelBridge explicitly configures Hybrid. The platform-account screen integrates with the product's existing authentication and trusted backend broker; it never embeds backend credentials or treats sign-in alone as proof of a KernelBridge license.
+
+## 1.1 Implementation checklist
+
+Use this checklist for the SDK repository migration, package upgrade, product integrations, and activation validation. Complete the gates in order. A checked item means it was verified in the relevant repository/product, not merely planned.
+
+### A. Preflight and baseline
+
+- [ ] Confirm write access to `labboisah/kernelbridge-license`, the current Laravel package source, the TypeScript SDK source, KernelBridge, and each target product repository.
+- [ ] Record the current branch, clean/dirty worktree, latest commit, package versions/tags, and remotes for every repository. Preserve unrelated work and never force-push or overwrite source history.
+- [ ] Inventory each target product: product code, KernelBridge licensing mode/runtime, current package and version, installation route/UI, licensing configuration, credential/state storage, existing users/installations, and deployment/test environment.
+- [ ] Identify the first Laravel pilot (MediFlow) and each additional Laravel or TypeScript product by repository and owner. Mark a product out of scope until its runtime, environment, and rollback owner are known.
+- [ ] Capture baseline tests/builds and the current activation behavior for each product. Save a sanitized test case for existing installations; do not copy credentials, activation codes, customer data, or production secrets into the SDK repository.
+- [ ] Confirm the KernelBridge protocol endpoints, error shapes, signing public-key availability, and current product modes required by the package version under test. Record any unsupported or deferred protocol capabilities before integration begins.
+
+### B. Establish the shared SDK repository
+
+- [ ] Inspect existing package repositories, monorepo copies, tags, package names, licenses, and histories; decide how to preserve history and avoid losing fixes or release metadata.
+- [ ] Create/verify the agreed layout in `labboisah/kernelbridge-license`: Laravel package, TypeScript SDK, shared protocol fixtures, and repository-level CI/tooling.
+- [ ] Import both existing package sources without changing public package names/exports accidentally. Future stack packages must be added to this same monorepo.
+- [ ] Add independent manifests, test/build commands, changelogs, and release workflows for Laravel and TypeScript. Keep shared protocol fixtures canonical and run each implementation against them.
+- [ ] Add the official KernelBridge logo and approved brand assets/styles to the package-owned activation experience with appropriate asset licensing/attribution. Ensure product branding cannot white-label, obscure, or replace KernelBridge identity.
+- [ ] Verify a clean checkout can install dependencies and build/test each package independently; verify package artifacts can be installed from a test tag or equivalent immutable artifact.
+- [ ] Document package configuration defaults and the installation/update/rollback instructions. Confirm a fresh install needs no licensing `.env` variables, generated environment file, machine token, or manual API URL setup.
+
+### C. Upgrade each product safely
+
+- [ ] Upgrade one product at a time to the compatible package artifact from the shared repository; pin the intended version and record the source/tag.
+- [ ] Back up product licensing state using the product's supported backup procedure. Verify upgrade migrations are additive/reversible and do not reinterpret legacy keys as installation credentials.
+- [ ] Remove product-authored licensing screens/controllers/client code only after the package provides the equivalent behavior and the product integration tests pass.
+- [ ] Confirm the package screen is visibly KernelBridge-branded and follows the centrally configured product mode. Keep product name/links contextual; do not provide an end-user mode selector.
+- [ ] Confirm installation identity and credentials are stored in the runtime's protected storage and never in `.env`, browser output, renderer IPC, logs, or diagnostics.
+- [ ] Confirm platform-account backend credentials, if used, remain server-side and are not requested from the customer or embedded in package configuration/client assets.
+- [ ] Run the product's complete targeted test suite, static analysis, and production build. Record failures against the pre-upgrade baseline and resolve regressions before testing activation.
+
+### D. Validate activation end to end
+
+- [ ] **Direct mode:** issue an installation-bound code from KernelBridge, activate through the package screen, restart the product, and verify the same installation remains licensed without retaining the activation code.
+- [ ] **Retry and rejection:** simulate a lost activation response and retry with the same installation UUID; verify no extra seat is consumed. Check wrong product, invalid/expired/revoked/replayed code, and seat-limit cases show safe, actionable messages.
+- [ ] **Platform Account mode, when applicable:** authenticate through the product's existing account system, validate and link the license through its trusted backend, then verify the active account link permits installation-bound code issuance.
+- [ ] **Entitlement and lifecycle:** verify signed entitlement state, product/installation binding, feature/limit enforcement, renewal/status refresh, deactivation, customer revocation, and immediate seat release.
+- [ ] **Security boundary:** confirm no installation bearer, activation code, HMAC/signing secret, or platform backend credential leaks to browser/renderer output, logs, analytics, exception messages, or support bundles.
+- [ ] **Brand and UX:** inspect activation, pending/approved/rejected, inactive/error, and recovery/status views at supported screen sizes; confirm official KernelBridge logo/colors/typography are correct and accessible.
+- [ ] Record product/version, SDK version, test environment, test cases, pass/fail, and sanitized request/correlation IDs. Never record secret values.
+
+### E. Release and rollout gate
+
+- [ ] Test rollback to the prior package/product release with existing licensing state preserved. Document any one-way migration before running it.
+- [ ] Keep production product licensing modes unchanged during the pilot unless KernelBridge explicitly approves and audits a separate policy change.
+- [ ] Publish immutable package tags and release notes only after CI, conformance, product tests, and rollback checks pass.
+- [ ] Roll out product by product with an owner, deployment window, monitoring plan, and support contact. Stop on unexplained activation failures, signature errors, unexpected seat changes, credential exposure, or irreversible state changes.
+- [ ] Update the inventory with deployed package versions, migration status, known limitations, and follow-up work. Do not mark the overall licensing rollout complete while any target product remains untested.
 
 ## 2. Repository and package boundaries
 
 ### Shared SDK repository
 
-- Use `https://github.com/labboisah/kernelbridge-license` as the dedicated licensing SDK monorepo, separate from the KernelBridge application repository. It contains both the Laravel and TypeScript SDKs, shared protocol artifacts, conformance tests, and common release documentation.
+- Use `https://github.com/labboisah/kernelbridge-license` as the dedicated licensing SDK monorepo, separate from the KernelBridge application repository. It contains the Laravel package, the TypeScript SDK, any additional supported-stack packages developed later, shared protocol artifacts, conformance tests, and common release documentation.
 - Use a clear monorepo structure, for example:
-  - `packages/laravel/` — Composer package source, tests, and package documentation.
-  - `packages/typescript/` — npm package source, tests, and package documentation.
+  - `packages/laravel/` — Laravel/Composer package source, tests, and package documentation.
+  - `packages/typescript/` — TypeScript/npm SDK source, tests, and package documentation.
+  - `packages/<runtime>/` — a separately versioned package for each additional supported language, framework, or runtime added later (for example, Spring Boot or Django).
   - `protocol/` — canonical protocol schema/documentation, versioned request/response fixtures, shared error codes, and signature test vectors.
   - `tools/` — only if needed for fixture validation, generation, or coordinated release automation.
 - The KernelBridge monorepo currently contains copies under `packages/kernelbridge/licensing-client-laravel` and `packages/kernelbridge/licensing-client-typescript`. Treat these as migration sources, not long-term competing package implementations, and remove or replace them only after downstream consumers can install reproducible tagged releases from the SDK repository.
-- Migrate the existing Laravel package source and TypeScript SDK/protocol sources into this canonical repository while preserving source history where practical. The existing `labboisah/laravel-licensing-package` repository is a migration source, not a competing long-term canonical home. Preserve current Composer/npm package names and delivery compatibility during the transition.
+- Migrate the existing Laravel package source and TypeScript SDK/protocol sources into this canonical repository while preserving source history where practical. The existing `labboisah/laravel-licensing-package` repository is a migration source, not a competing long-term canonical home. Preserve current Composer/npm package names and delivery compatibility during the transition. Future supported-stack clients are added to this same repository rather than creating a separate SDK repository per language or framework.
 - Preserve package names and public exports (`kernelbridge/licensing-client-laravel`, `KernelBridge\LicensingClient`, and `@kernelbridge/licensing-client-typescript`) unless a separately versioned breaking change is approved.
 - Share protocol definitions and conformance fixtures in-repository to prevent contract drift, while keeping runtime-specific implementations separate. A shared source does not mean Laravel must depend on TypeScript or vice versa.
-- Keep independent semantic versions and changelogs for each package. Use coordinated contract/fixture updates and CI to test compatibility across both implementations; release either package independently when its own changes are ready.
+- Keep independent semantic versions, changelogs, manifests, tests, and release workflows for each package. Use the shared protocol fixtures and CI to test every supported implementation; release packages independently when their changes are ready, without requiring unrelated runtimes to publish.
 - Continue Composer-compatible Git tags and the current npm distribution approach initially where practical. Decide whether Composer/npm publication workflows can live together or need narrowly scoped package release jobs. Make no registry or public-visibility change without approval.
 
 ### KernelBridge remains authoritative for
@@ -40,7 +92,7 @@ The SDK repository must not contain product machine credentials, entitlement sig
 
 ## 3. Shared API contract
 
-Keep KernelBridge as the authoritative server contract and the SDK monorepo's `protocol/` directory as its consumer-facing, versioned specification and conformance-fixture set. Changes to the server contract must update the SDK protocol artifacts and test both SDK implementations in the same change or coordinated changes. Do not copy independently edited protocol definitions into each package.
+Keep KernelBridge as the authoritative server contract and the SDK monorepo's `protocol/` directory as its consumer-facing, versioned specification and conformance-fixture set. Changes to the server contract must update the SDK protocol artifacts and test every supported SDK implementation in the same change or coordinated changes. Do not copy independently edited protocol definitions into each package.
 
 ### Current unified installation exchange
 
@@ -133,9 +185,9 @@ Before SDK rollout, complete the contract required by all packages: unified inst
 
 ## 6. Cross-package engineering standards
 
-- Keep independent semantic versions and changelogs for Laravel and TypeScript packages inside the shared repository; a release in one package must not require publishing the other.
+- Keep independent semantic versions and changelogs for each supported package (initially Laravel and TypeScript) inside the shared repository; a release in one package must not require publishing the others.
 - Declare the supported KernelBridge API protocol range and minimum server capability in each package. Use explicit capability negotiation or documented server minimums, not customer-controlled licensing-mode flags.
-- Define support matrices: Laravel/PHP/framework versions for the Laravel package; Node/Electron/OS and storage-vault versions for TypeScript.
+- Define a per-package support matrix: Laravel/PHP/framework versions for the Laravel package; Node/Electron/OS and storage-vault versions for TypeScript; and corresponding language, framework, OS, and secure-storage versions for each future runtime package.
 - Use the same fixture scenarios for code exchange, lost response retry, verification, Ed25519 signature failures/key rotation, expiry, revocation, outage/offline grace, state migration, and safe error redaction.
 - Run static analysis, formatting, unit/integration tests, package builds, dependency/security review, and install-from-tag smoke tests in the shared repository's CI, with package-specific jobs and release gates.
 - Pin dependencies and review native dependency/platform support, especially TypeScript's optional `better-sqlite3` adapter and Electron native rebuild requirements.
@@ -151,22 +203,23 @@ Before SDK rollout, complete the contract required by all packages: unified inst
 5. **TypeScript SDK migration:** Import TypeScript source/history into the same repository, preserve package exports, and verify npm/package installation and builds independently.
 6. **Compatibility releases:** Publish Laravel and TypeScript releases that can read existing state and keep legacy activation alive while adding the new protocol behind a compatible path. Do not yet switch MediFlow or other products to strict Direct mode.
 7. **Integration pilots:** Upgrade MediFlow staging with the Laravel SDK; separately integrate the TypeScript SDK into an identified desktop product. Validate installation identity, credential storage, outage behavior, and rollback.
-8. **Product onboarding:** Update KernelBridge product registration/admin workflow to show supported runtime, recommended package/release, and package install instructions plus any non-secret package-manifest configuration. Validate a fresh sample product can activate using the package without custom licensing code or licensing `.env` setup.
-9. **Controlled rollout and retirement:** Upgrade product packages first, migrate installations under KernelBridge control, monitor results, then switch each product's new-activation policy. Deprecate legacy reusable-key activation only after usage evidence and migration support meet release gates.
+8. **Future runtime packages:** When another stack is approved, add its implementation, package-specific support matrix, tests, and independent release workflow under `packages/<runtime>/`; require it to pass the shared protocol conformance suite. Do not split it into another repository.
+9. **Product onboarding:** Update KernelBridge product registration/admin workflow to show supported runtime, recommended package/release, and package install instructions plus any non-secret package-manifest configuration. Validate a fresh sample product can activate using the package without custom licensing code or licensing `.env` setup.
+10. **Controlled rollout and retirement:** Upgrade product packages first, migrate installations under KernelBridge control, monitor results, then switch each product's new-activation policy. Deprecate legacy reusable-key activation only after usage evidence and migration support meet release gates.
 
 ## 8. Acceptance criteria
 
-- Both SDKs and the shared protocol artifacts have a canonical home in one SDK repository; each package can be independently installed from a tagged release in a clean product application.
+- The Laravel package, TypeScript SDK, any future supported-stack packages, and shared protocol artifacts have one canonical home in this SDK repository; each package can be independently installed from a tagged release in a clean product application.
 - A fresh supported product installation requires no licensing `.env` entries, generated environment file, or manual API endpoint/machine-token setup; public product identity/defaults come from the package or generated manifest, while runtime credentials remain in protected package state.
 - A new Direct-mode product can be registered in KernelBridge, install its supported package, enter one installation code in the package-owned activation screen, and become licensed without a product machine token or custom licensing client.
-- The package supplies the in-product activation screen for Direct and Platform Account modes; the screen follows KernelBridge policy, and platform-account activation integrates the product's existing authentication and trusted backend without exposing backend credentials or bypassing owner approval.
-- Laravel never exposes the installation credential to browser code; TypeScript never exposes it to the renderer.
-- Both clients verify the exact Ed25519-signed payload and reject malformed, mismatched, stale, or invalid signatures.
-- Existing Laravel and TypeScript local state remains recoverable through documented migration and rollback paths.
+- The package supplies the in-product activation screen for Direct and Platform Account modes; the screen follows KernelBridge policy, and platform-account activation integrates the product's existing authentication and trusted backend without exposing backend credentials.
+- Laravel never exposes the installation credential to browser code; TypeScript never exposes it to the renderer; every future runtime package must enforce its documented trust boundary.
+- Every supported client verifies the exact Ed25519-signed payload and rejects malformed, mismatched, stale, or invalid signatures.
+- Existing Laravel and TypeScript local state remains recoverable through documented migration and rollback paths; future packages provide equivalent state lifecycle and compatibility documentation.
 - Same-install retry after a simulated lost exchange response returns usable state without consuming another seat; another installation cannot redeem the same code.
 - The package activation/status UX, error reasons, entitlement cache, offline policy, and revocation behavior are consistent with the server contract.
 - Product configuration is limited to documented public identity and integration hooks; products do not set licensing mode or ship KernelBridge product API credentials.
-- CI validates protocol fixtures and both package builds/tests from the shared repository while each tagged package artifact remains independently installable.
+- CI validates protocol fixtures and each supported package's build/tests from the shared repository while every tagged package artifact remains independently installable and releasable.
 
 ## 9. Open decisions to resolve during implementation
 

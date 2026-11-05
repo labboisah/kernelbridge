@@ -2,12 +2,17 @@
 
 namespace Tests\Feature;
 
-use App\Domain\Licensing\Services\InstallationActivationService;
-use App\Domain\Licensing\Services\LicenseService;
-use App\Domain\Licensing\Exceptions\InstallationVerificationException;
 use App\Domain\Integration\Services\ApiCredentialService;
+use App\Domain\Licensing\Exceptions\InstallationVerificationException;
+use App\Domain\Licensing\Services\InstallationActivationService;
+use App\Domain\Licensing\Services\InstallationSeatAllocator;
+use App\Domain\Licensing\Services\LicenseService;
 use App\Models\ApiClient;
 use App\Models\Customer;
+use App\Models\EntitlementCatalogRevision;
+use App\Models\EntitlementPlanMapping;
+use App\Models\EntitlementSourceGrant;
+use App\Models\LicenseInstallation;
 use App\Models\LicensePlatformAccountLink;
 use App\Models\Plan;
 use App\Models\Product;
@@ -15,12 +20,15 @@ use App\Models\SoftwareLicense;
 use App\Models\Subscription;
 use App\Models\SubscriptionEntitlement;
 use App\Models\User;
+use App\Support\CanonicalJson;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Crypt;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
-use Illuminate\Support\Carbon;
 use Tests\TestCase;
 
 final class InstallationActivationServiceTest extends TestCase
@@ -169,6 +177,12 @@ final class InstallationActivationServiceTest extends TestCase
         $signedPayload = json_decode($activation['signed_entitlements']['payload_json'], true);
         $this->assertSame('direct', $signedPayload['licensing_mode']);
         $this->assertSame(1, $signedPayload['licensing_policy_revision']);
+        $this->assertSame(
+            'direct',
+            LicenseInstallation::query()
+                ->where('installation_uuid', $activation['installation_uuid'])
+                ->value('entitlement_source'),
+        );
         $initialRevision = $signedPayload['entitlement_revision'];
         $this->assertIsInt($initialRevision);
         $signingSecret = base64_decode((string) config('product_integration.signing.secret_key'));
@@ -198,6 +212,220 @@ final class InstallationActivationServiceTest extends TestCase
         $updatedSnapshot = $service->signedEntitlements($installation);
         $updatedPayload = json_decode($updatedSnapshot['payload_json'], true);
         $this->assertGreaterThan($initialRevision, $updatedPayload['entitlement_revision']);
+    }
+
+    public function test_shadow_comparison_logs_diagnostics_without_changing_the_signed_payload(): void
+    {
+        [$product, $license] = $this->licenseFixture();
+        config(['entitlement_framework.shadow_enabled' => true]);
+        Log::spy();
+
+        $issued = app(InstallationActivationService::class)->issueCode($license);
+        $activation = app(InstallationActivationService::class)->exchange([
+            'activation_code' => $issued['code'],
+            'product_code' => $product->code,
+            'installation_uuid' => (string) Str::uuid(),
+        ]);
+        $payload = json_decode($activation['signed_entitlements']['payload_json'], true);
+
+        $this->assertArrayHasKey('entitlements', $payload);
+        $this->assertArrayNotHasKey('entitlement_framework', $payload);
+        Log::shouldHaveReceived('info')->once()->withArgs(function (string $message, array $context): bool {
+            return $message === 'entitlement_framework.shadow_comparison'
+                && isset($context['source'], $context['status'], $context['proposed_digest'])
+                && isset($context['added_keys'], $context['removed_keys'], $context['changed_keys'])
+                && ! array_key_exists('grants', $context)
+                && ! array_key_exists('installation_uuid', $context);
+        });
+    }
+
+    public function test_opt_in_signed_snapshot_includes_source_bound_framework_without_changing_legacy_entitlements(): void
+    {
+        [$product, $license] = $this->licenseFixture();
+        $catalog = EntitlementCatalogRevision::query()->create([
+            'product_id' => $product->id,
+            'schema_version' => 1,
+            'catalog_revision' => 1,
+            'catalog' => [
+                'schema_version' => 1,
+                'product_code' => $product->code,
+                'catalog_revision' => 1,
+                'packages' => [[
+                    'key' => 'core',
+                    'modules' => [[
+                        'key' => 'finance',
+                        'capabilities' => [
+                            ['key' => 'finance.view', 'type' => 'capability'],
+                            ['key' => 'branches.max', 'type' => 'limit', 'unit' => 'branches', 'scope' => 'business'],
+                        ],
+                    ]],
+                ]],
+                'plans' => [],
+            ],
+            'catalog_digest' => str_repeat('a', 64),
+            'published_at' => now(),
+        ]);
+        $grants = [
+            'finance.view' => ['type' => 'capability', 'enabled' => true],
+            'branches.max' => [
+                'type' => 'limit',
+                'state' => 'finite',
+                'value' => 5,
+                'unit' => 'branches',
+                'scope' => 'business',
+            ],
+        ];
+        EntitlementPlanMapping::query()->create([
+            'plan_id' => $license->subscription->plan_id,
+            'entitlement_catalog_revision_id' => $catalog->id,
+            'source_revision' => 2,
+            'grants' => $grants,
+            'mapping_digest' => CanonicalJson::digest($grants),
+            'published_at' => now(),
+        ]);
+        $issued = app(InstallationActivationService::class)->issueCode($license);
+        $activation = app(InstallationActivationService::class)->exchange([
+            'activation_code' => $issued['code'],
+            'product_code' => $product->code,
+            'installation_uuid' => (string) Str::uuid(),
+        ]);
+        $legacyPayload = json_decode($activation['signed_entitlements']['payload_json'], true, 512, JSON_THROW_ON_ERROR);
+        $this->assertArrayNotHasKey('entitlement_framework', $legacyPayload);
+        config(['entitlement_framework.snapshot_enabled' => true]);
+        $installation = app(InstallationActivationService::class)->authenticate($activation['credential']);
+        $this->assertNotNull($installation);
+        $activation['signed_entitlements'] = app(InstallationActivationService::class)->signedEntitlements($installation);
+        $signed = $activation['signed_entitlements'];
+        $payload = json_decode($signed['payload_json'], true, 512, JSON_THROW_ON_ERROR);
+
+        $this->assertSame('direct', $payload['entitlement_framework']['source']);
+        $this->assertSame(1, $payload['entitlement_framework']['catalog_revision']);
+        $this->assertSame(2, $payload['entitlement_framework']['source_revision']);
+        $this->assertSame($grants, $payload['entitlement_framework']['grants']);
+        $this->assertArrayHasKey('entitlements', $payload);
+        $this->assertSame('ed25519', $signed['algorithm']);
+        $secret = base64_decode((string) config('product_integration.signing.secret_key'), true);
+        $this->assertTrue(sodium_crypto_sign_verify_detached(
+            base64_decode($signed['signature'], true),
+            $signed['payload_json'],
+            sodium_crypto_sign_publickey_from_secretkey($secret),
+        ));
+
+        DB::table('entitlement_plan_mappings')
+            ->where('plan_id', $license->subscription->plan_id)
+            ->update([
+                'grants' => '{}',
+                'mapping_digest' => CanonicalJson::digest(new \stdClass),
+            ]);
+        $emptyGrantSnapshot = app(InstallationActivationService::class)->signedEntitlements($installation);
+        $emptyGrantPayload = json_decode($emptyGrantSnapshot['payload_json'], false, 512, JSON_THROW_ON_ERROR);
+
+        $this->assertInstanceOf(\stdClass::class, $emptyGrantPayload->entitlement_framework->grants);
+        $this->assertSame([], get_object_vars($emptyGrantPayload->entitlement_framework->grants));
+    }
+
+    public function test_opt_in_signed_snapshot_omits_the_extension_and_logs_when_no_source_mapping_exists(): void
+    {
+        [$product, $license] = $this->licenseFixture();
+        config(['entitlement_framework.snapshot_enabled' => true]);
+        Log::spy();
+
+        $issued = app(InstallationActivationService::class)->issueCode($license);
+        $activation = app(InstallationActivationService::class)->exchange([
+            'activation_code' => $issued['code'],
+            'product_code' => $product->code,
+            'installation_uuid' => (string) Str::uuid(),
+        ]);
+        $payload = json_decode($activation['signed_entitlements']['payload_json'], true, 512, JSON_THROW_ON_ERROR);
+
+        $this->assertArrayNotHasKey('entitlement_framework', $payload);
+        Log::shouldHaveReceived('warning')->once()->withArgs(function (string $message, array $context): bool {
+            return $message === 'entitlement_framework.snapshot_not_attached'
+                && ($context['status'] ?? null) === 'missing_mapping'
+                && ! array_key_exists('grants', $context);
+        });
+    }
+
+    public function test_opt_in_signed_snapshot_uses_the_bound_platform_account_grant(): void
+    {
+        [$product, $license] = $this->licenseFixture();
+        $product->forceFill(['licensing_mode' => 'platform_account'])->save();
+        $client = ApiClient::query()->create([
+            'product_id' => $product->id,
+            'name' => 'Platform snapshot test',
+            'is_active' => true,
+            'rate_limit_per_minute' => 120,
+            'scopes' => ['licensing:entitlement-grants:write'],
+        ]);
+        $businessUuid = (string) Str::uuid();
+        $link = LicensePlatformAccountLink::query()->create([
+            'software_license_id' => $license->id,
+            'product_id' => $product->id,
+            'business_uuid' => $businessUuid,
+            'status' => 'approved',
+            'requested_by_api_client_id' => $client->id,
+            'approved_at' => now(),
+        ]);
+        $installationUuid = (string) Str::uuid();
+        $installation = LicenseInstallation::query()->create([
+            'software_license_id' => $license->id,
+            'product_id' => $product->id,
+            'license_platform_account_link_id' => $link->id,
+            'entitlement_source' => 'product_platform',
+            'installation_uuid' => $installationUuid,
+            'business_uuid' => $businessUuid,
+            'credential_hash' => hash('sha256', Str::random(40)),
+            'status' => 'active',
+            'activated_at' => now(),
+        ]);
+        $grants = [
+            'finance.view' => ['type' => 'capability', 'enabled' => true],
+        ];
+        $catalog = EntitlementCatalogRevision::query()->create([
+            'product_id' => $product->id,
+            'schema_version' => 1,
+            'catalog_revision' => 1,
+            'catalog' => [
+                'schema_version' => 1,
+                'product_code' => $product->code,
+                'catalog_revision' => 1,
+                'packages' => [[
+                    'key' => 'finance',
+                    'modules' => [[
+                        'key' => 'finance',
+                        'capabilities' => [
+                            ['key' => 'finance.view', 'type' => 'capability'],
+                        ],
+                    ]],
+                ]],
+                'plans' => [],
+            ],
+            'catalog_digest' => str_repeat('a', 64),
+            'published_at' => now(),
+        ]);
+        EntitlementSourceGrant::query()->create([
+            'product_id' => $product->id,
+            'software_license_id' => $license->id,
+            'license_platform_account_link_id' => $link->id,
+            'entitlement_catalog_revision_id' => $catalog->id,
+            'source' => 'product_platform',
+            'source_revision' => 4,
+            'idempotency_key' => hash_hmac('sha256', 'platform-snapshot-test', (string) config('app.key')),
+            'grants' => $grants,
+            'payload_digest' => str_repeat('b', 64),
+            'accepted_at' => now(),
+        ]);
+        config(['entitlement_framework.snapshot_enabled' => true]);
+
+        $signed = app(InstallationActivationService::class)->signedEntitlements($installation);
+        $payload = json_decode($signed['payload_json'], true, 512, JSON_THROW_ON_ERROR);
+
+        $this->assertSame('product_platform', $payload['entitlement_framework']['source']);
+        $this->assertSame(1, $payload['entitlement_framework']['catalog_revision']);
+        $this->assertSame(4, $payload['entitlement_framework']['source_revision']);
+        $this->assertSame($grants, $payload['entitlement_framework']['grants']);
+        $this->assertSame($link->uuid, $payload['platform_account_link_uuid']);
+        $this->assertArrayHasKey('entitlements', $payload);
     }
 
     public function test_effective_entitlement_boundaries_advance_the_signed_revision(): void
@@ -234,7 +462,7 @@ final class InstallationActivationServiceTest extends TestCase
         $this->assertGreaterThan($before['entitlement_revision'], $afterPayload['entitlement_revision']);
     }
 
-    public function test_platform_backend_request_requires_customer_approval_before_bound_installation_code_issuance(): void
+    public function test_platform_backend_request_links_immediately_before_bound_installation_code_issuance(): void
     {
         [$product, $license] = $this->licenseFixture();
         $product->forceFill(['licensing_mode' => 'platform_account'])->save();
@@ -247,34 +475,49 @@ final class InstallationActivationServiceTest extends TestCase
         ]);
         $issuedCredential = app(ApiCredentialService::class)->issue($client, 'platform-backend');
         $businessUuid = (string) Str::uuid();
-        $pending = $this->withToken($issuedCredential['token'])->postJson('/api/v1/platform/account-links/requests', [
-            'license_uuid' => $license->uuid,
+        $activationCode = app(LicenseService::class)->key($license);
+        $this->assertNotNull($activationCode);
+        $link = $this->withToken($issuedCredential['token'])->postJson('/api/v1/platform/account-links/requests', [
+            'activation_code' => $activationCode,
             'business_uuid' => $businessUuid,
-        ])->assertAccepted()
-            ->assertJsonPath('data.status', 'pending')
+        ])->assertOk()
+            ->assertJsonPath('data.status', 'approved')
+            ->assertJsonPath('data.license_uuid', $license->uuid)
+            ->assertJsonPath('data.subscription_uuid', $license->subscription->uuid)
+            ->assertJsonPath('data.license_status', 'active')
+            ->assertJsonMissing(['activation_code' => $activationCode])
             ->json('data');
+        $this->assertDatabaseMissing('license_business_claims', [
+            'software_license_id' => $license->id,
+            'business_uuid' => strtolower($businessUuid),
+        ]);
 
-        $owner = User::factory()->create();
-        $license->subscription->customer->users()->attach($owner->id, ['is_primary' => true]);
-        $member = User::factory()->create();
-        $license->subscription->customer->users()->attach($member->id, ['is_primary' => false]);
-        $this->actingAs($member)->post(route('portal.platform-account-links.approve', $pending['uuid']))
-            ->assertForbidden();
+        $linkRecord = LicensePlatformAccountLink::query()->where('uuid', $link['uuid'])->firstOrFail();
+        $this->assertNotNull($linkRecord->approved_at);
+        $this->assertNull($linkRecord->approved_by_user_id);
+
+        $linkRecord->forceFill(['status' => 'pending', 'approved_at' => null])->save();
+        $retriedLink = $this->withToken($issuedCredential['token'])
+            ->postJson('/api/v1/platform/account-links/requests', [
+                'license_uuid' => $license->uuid,
+                'business_uuid' => $businessUuid,
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.status', 'approved')
+            ->json('data');
+        $this->assertSame($link['uuid'], $retriedLink['uuid']);
+        $this->assertSame(1, LicensePlatformAccountLink::query()
+            ->where('software_license_id', $license->id)
+            ->where('business_uuid', strtolower($businessUuid))
+            ->count());
 
         $installationUuid = (string) Str::uuid();
         $issueRequest = [
             'installation_uuid' => $installationUuid,
             'device_name' => 'Clinic server',
         ];
-        $this->withToken($issuedCredential['token'])
-            ->postJson('/api/v1/platform/account-links/'.$pending['uuid'].'/activation-codes', $issueRequest)
-            ->assertForbidden()
-            ->assertJsonPath('error.code', 'platform_account_not_approved');
 
-        $this->actingAs($owner)->post(route('portal.platform-account-links.approve', $pending['uuid']))
-            ->assertRedirect();
-
-        $codeEndpoint = '/api/v1/platform/account-links/'.$pending['uuid'].'/activation-codes';
+        $codeEndpoint = '/api/v1/platform/account-links/'.$link['uuid'].'/activation-codes';
         $firstCode = $this->withToken($issuedCredential['token'])->postJson($codeEndpoint, $issueRequest)
             ->assertCreated()
             ->assertJsonPath('data.installation_uuid', $installationUuid)
@@ -283,7 +526,7 @@ final class InstallationActivationServiceTest extends TestCase
             ->assertCreated()
             ->json('data.activation_code');
         $this->assertNotSame($firstCode, $code);
-        $this->assertSame(1, app(\App\Domain\Licensing\Services\InstallationSeatAllocator::class)->used($license));
+        $this->assertSame(1, app(InstallationSeatAllocator::class)->used($license));
 
         $this->postJson('/api/v1/installations/activate', [
             'activation_code' => $code,
@@ -300,11 +543,12 @@ final class InstallationActivationServiceTest extends TestCase
 
         $signedPayload = json_decode($activated['signed_entitlements']['payload_json'], true);
         $this->assertSame(strtolower($businessUuid), $signedPayload['business_uuid']);
-        $linkId = LicensePlatformAccountLink::query()->where('uuid', $pending['uuid'])->value('id');
+        $linkId = LicensePlatformAccountLink::query()->where('uuid', $link['uuid'])->value('id');
         $this->assertDatabaseHas('license_installations', [
             'installation_uuid' => $installationUuid,
             'business_uuid' => strtolower($businessUuid),
             'license_platform_account_link_id' => $linkId,
+            'entitlement_source' => 'product_platform',
         ]);
     }
 
@@ -319,7 +563,7 @@ final class InstallationActivationServiceTest extends TestCase
             'installation_uuid' => (string) Str::uuid(),
         ]);
 
-        $this->assertSame(1, app(\App\Domain\Licensing\Services\InstallationSeatAllocator::class)->used($license));
+        $this->assertSame(1, app(InstallationSeatAllocator::class)->used($license));
 
         $this->withToken($activation['credential'])->postJson('/api/v1/installations/deactivate')
             ->assertOk()
@@ -330,13 +574,13 @@ final class InstallationActivationServiceTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.status', 'deactivated');
 
-        $this->assertSame(0, app(\App\Domain\Licensing\Services\InstallationSeatAllocator::class)->used($license));
+        $this->assertSame(0, app(InstallationSeatAllocator::class)->used($license));
         $this->withToken($activation['credential'])->postJson('/api/v1/installations/verify')
             ->assertForbidden()
             ->assertJsonPath('error.code', 'installation_deactivated');
         $this->assertDatabaseHas('audit_logs', [
             'event' => 'license.installation.deactivated',
-            'entity_type' => \App\Models\LicenseInstallation::class,
+            'entity_type' => LicenseInstallation::class,
         ]);
         $this->assertNotNull($service->authenticate($activation['credential']));
     }
@@ -346,6 +590,7 @@ final class InstallationActivationServiceTest extends TestCase
         [, $license] = $this->licenseFixture(1);
         $service = app(InstallationActivationService::class);
         $first = $service->issueCode($license);
+        $first['activation_code']->forceFill(['expires_at' => now()->subMinute()])->save();
         $replacement = $service->issueCode($license, null, $first['activation_code']->uuid);
 
         $this->assertSame('revoked', $first['activation_code']->fresh()->status);
@@ -355,6 +600,21 @@ final class InstallationActivationServiceTest extends TestCase
 
         $this->expectException(ValidationException::class);
         $service->issueCode($license);
+    }
+
+    public function test_a_redeemed_code_cannot_be_replaced(): void
+    {
+        [$product, $license] = $this->licenseFixture(1);
+        $service = app(InstallationActivationService::class);
+        $issued = $service->issueCode($license);
+        $service->exchange([
+            'activation_code' => $issued['code'],
+            'product_code' => $product->code,
+            'installation_uuid' => (string) Str::uuid(),
+        ]);
+
+        $this->expectException(ValidationException::class);
+        $service->issueCode($license, null, $issued['activation_code']->uuid);
     }
 
     public function test_a_reserved_code_prevents_legacy_activation_from_overselling_the_same_seat(): void
@@ -456,12 +716,16 @@ final class InstallationActivationServiceTest extends TestCase
             'grace_ends_at' => null,
             'created_by' => $user->id,
         ]);
+        $licenseKey = 'KBT-'.strtoupper(Str::random(8).'-'.Str::random(8).'-'.Str::random(8));
         $license = SoftwareLicense::factory()->create([
             'subscription_id' => $subscription->id,
             'customer_id' => $customer->id,
             'product_id' => $product->id,
             'status' => 'active',
             'expires_at' => now()->addMonth(),
+            'key_lookup' => hash_hmac('sha256', $licenseKey, (string) config('app.key')),
+            'key_hash' => Hash::make($licenseKey),
+            'metadata' => ['encrypted_license_key' => Crypt::encryptString($licenseKey)],
         ]);
         SubscriptionEntitlement::query()->create([
             'subscription_id' => $subscription->id,

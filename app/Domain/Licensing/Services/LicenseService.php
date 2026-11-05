@@ -96,6 +96,11 @@ final class LicenseService
         return is_string($encrypted) && $encrypted !== '' ? Crypt::decryptString($encrypted) : null;
     }
 
+    public function resolveForPlatformAccountLink(ApiClient $client, string $activationCode): SoftwareLicense
+    {
+        return $this->resolve($client, $activationCode, true);
+    }
+
     public function cacheSigningKey(SoftwareLicense $license): string
     {
         $encrypted = data_get($license->metadata, 'encrypted_cache_signing_key');

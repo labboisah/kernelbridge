@@ -39,7 +39,7 @@ final class McpController extends Controller
         ],
         'platform_account' => [
             'label' => 'Platform licensing integration',
-            'description' => 'Allow the trusted product backend to request customer-approved account links and installation codes.',
+            'description' => 'Allow the trusted product backend to link valid licenses and request installation codes.',
             'scopes' => ['licensing:account-link'],
         ],
     ];

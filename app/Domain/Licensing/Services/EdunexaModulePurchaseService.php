@@ -30,6 +30,7 @@ final readonly class EdunexaModulePurchaseService
             $enabledFeatures = $plan->features->keyBy('feature_key');
             $modules = [];
             $licensedFeatures = [];
+            $licensedEntitlements = [];
             foreach (config('edunexa.modules', []) as $module) {
                 $moduleFeatureKey = 'module_'.Str::snake($module['key']);
                 $moduleFeature = $enabledFeatures->get($moduleFeatureKey);
@@ -44,6 +45,25 @@ final readonly class EdunexaModulePurchaseService
                 $modules[] = [
                     'key' => $module['key'], 'module_code' => $module['key'], 'name' => $module['name'],
                     'description' => $module['description'], 'features' => $features,
+                ];
+            }
+            if (($maxUsers = $enabledFeatures->get('max_users')) && $maxUsers->enabled) {
+                $licensedFeatures[] = 'max_users';
+            }
+            foreach (array_unique($licensedFeatures) as $featureKey) {
+                $feature = $enabledFeatures->get($featureKey);
+                if (! $feature || ! $feature->enabled) {
+                    continue;
+                }
+                $licensedEntitlements[] = [
+                    'key' => $feature->feature_key, 'name' => $feature->feature_name,
+                    'enabled' => true, 'limit' => $feature->limit_value, 'source_plan_id' => $plan->id,
+                ];
+            }
+            foreach ($plan->limits as $limit) {
+                $licensedEntitlements[] = [
+                    'key' => $limit->limit_key, 'name' => $limit->limit_name,
+                    'enabled' => true, 'limit' => $limit->limit_value, 'source_plan_id' => $plan->id,
                 ];
             }
 
@@ -84,6 +104,7 @@ final readonly class EdunexaModulePurchaseService
                     'primary_package' => config('edunexa.core_module'),
                     'selected_packages' => array_column($modules, 'module_code'),
                     'package_names' => [$plan->name], 'licensed_modules' => array_values(array_unique($licensedFeatures)),
+                    'licensed_entitlements' => $licensedEntitlements,
                     'package_prices' => array_map(fn ($module) => [
                         'key' => $module['key'], 'configuration' => $module,
                     ], $modules), 'configuration_revision' => 1,

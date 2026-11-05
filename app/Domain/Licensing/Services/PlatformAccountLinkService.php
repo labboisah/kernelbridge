@@ -55,6 +55,10 @@ final class PlatformAccountLinkService
                     throw new PlatformAccountLinkException('license_already_linked', 'This license is already linked or has a pending link to another platform account.', 409);
                 }
 
+                if ($existingForLicense->status === 'pending') {
+                    $existingForLicense = $this->markApproved($existingForLicense, null);
+                }
+
                 return $this->publicLink($existingForLicense);
             }
 
@@ -85,7 +89,24 @@ final class PlatformAccountLinkService
                 'api_client_uuid' => $client->uuid,
             ], $link);
 
+            $link = $this->markApproved($link, null);
+
             return $this->publicLink($link);
+        });
+    }
+
+    public function requestWithActivationCode(
+        ApiClient $client,
+        LicenseService $licenses,
+        string $activationCode,
+        string $businessUuid,
+    ): array {
+        $this->assertIntegrationScope($client);
+
+        return DB::transaction(function () use ($client, $licenses, $activationCode, $businessUuid): array {
+            $license = $licenses->resolveForPlatformAccountLink($client, $activationCode);
+
+            return $this->request($client, $license->uuid, $businessUuid);
         });
     }
 
@@ -101,6 +122,11 @@ final class PlatformAccountLinkService
     }
 
     public function approve(LicensePlatformAccountLink $link, User $actor): LicensePlatformAccountLink
+    {
+        return $this->markApproved($link, $actor);
+    }
+
+    private function markApproved(LicensePlatformAccountLink $link, ?User $actor): LicensePlatformAccountLink
     {
         return DB::transaction(function () use ($link, $actor): LicensePlatformAccountLink {
             $license = SoftwareLicense::query()->with('product')->lockForUpdate()->findOrFail($link->software_license_id);
@@ -137,7 +163,7 @@ final class PlatformAccountLinkService
 
             $link->forceFill([
                 'status' => 'approved',
-                'approved_by_user_id' => $actor->id,
+                'approved_by_user_id' => $actor?->id,
                 'approved_at' => now(),
                 'rejected_at' => null,
             ])->save();
@@ -146,6 +172,7 @@ final class PlatformAccountLinkService
                 'license_uuid' => $license->uuid,
                 'product_uuid' => $product->uuid,
                 'business_uuid' => $link->business_uuid,
+                'authorization_method' => $actor ? 'customer_approval' : 'trusted_platform_credential',
             ], $link);
 
             return $link;
@@ -302,12 +329,38 @@ final class PlatformAccountLinkService
     /** @return array<string, mixed> */
     public function publicLink(LicensePlatformAccountLink $link): array
     {
+        $license = $link->license()->with('subscription')->firstOrFail();
+        $subscription = $license->subscription;
+
         return [
             'uuid' => $link->uuid,
-            'license_uuid' => $link->license()->value('uuid'),
+            'license_uuid' => $license->uuid,
             'product_code' => strtoupper((string) $link->product()->value('code')),
             'business_uuid' => $link->business_uuid,
             'status' => $link->status,
+            'license_status' => $subscription?->status->value ?? $license->status,
+            'subscription_uuid' => $subscription?->uuid,
+            'subscription_status' => $subscription?->status->value,
+            'plan' => [
+                'uuid' => $subscription?->plan()->value('uuid'),
+                'name' => $subscription?->plan()->value('name'),
+            ],
+            'starts_at' => $subscription?->starts_at?->toISOString(),
+            'ends_at' => $subscription?->ends_at?->toISOString(),
+            'expires_at' => $license->expires_at?->toISOString(),
+            'grace_expires_at' => $subscription?->grace_ends_at?->toISOString(),
+            'entitlement_revision' => $subscription?->entitlement_revision,
+            'entitlements' => $subscription?->entitlements()
+                ->where(fn ($query) => $query->whereNull('effective_from')->orWhere('effective_from', '<=', now()))
+                ->where(fn ($query) => $query->whereNull('effective_until')->orWhere('effective_until', '>', now()))
+                ->orderBy('feature_key')
+                ->get()
+                ->map(fn ($entitlement) => [
+                    'key' => $entitlement->feature_key,
+                    'name' => $entitlement->feature_name,
+                    'enabled' => $entitlement->enabled,
+                    'limit' => $entitlement->limit_value,
+                ])->values()->all() ?? [],
             'requested_at' => $link->created_at?->toISOString(),
             'approved_at' => $link->approved_at?->toISOString(),
             'rejected_at' => $link->rejected_at?->toISOString(),

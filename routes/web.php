@@ -95,6 +95,8 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
         Route::post('/checkout', [CheckoutController::class, 'store'])->middleware('throttle:10,1')->name('checkout.store');
         Route::get('/services/{subscription:uuid}/environment', [CheckoutController::class, 'environment'])->name('services.environment');
         Route::get('/services', [CustomerPortalController::class, 'services'])->name('services.index');
+        Route::get('/subscriptions', [CustomerPortalController::class, 'subscriptions'])->name('subscriptions.index');
+        Route::get('/organization', [CustomerPortalController::class, 'organization'])->name('organization.index');
         Route::get('/services/create', [CustomerPortalController::class, 'createService'])->name('services.create');
         Route::post('/services', [CustomerPortalController::class, 'storeService'])->name('services.store');
         Route::get('/services/{subscription:uuid}/edit', [CustomerPortalController::class, 'editService'])->name('services.edit');
@@ -180,6 +182,8 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
         Route::get('/plans/{plan:uuid}', [AdminPlanController::class, 'show'])->name('plans.show');
         Route::get('/plans/{plan:uuid}/edit', [AdminPlanController::class, 'edit'])->name('plans.edit');
         Route::put('/plans/{plan:uuid}', [AdminPlanController::class, 'update'])->name('plans.update');
+        Route::get('/plans/{plan:uuid}/entitlements', [AdminPlanController::class, 'entitlements'])->name('plans.entitlements');
+        Route::put('/plans/{plan:uuid}/entitlements', [AdminPlanController::class, 'publishEntitlements'])->name('plans.entitlements.publish');
         Route::delete('/plans/{plan:uuid}', [AdminPlanController::class, 'destroy'])->name('plans.destroy');
     });
 });

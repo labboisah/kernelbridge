@@ -21,9 +21,10 @@ defineProps({
         <template v-else-if="name === 'products'"><path d="m12 2 9 5-9 5-9-5z"/><path d="m3 12 9 5 9-5M3 17l9 5 9-5"/></template>
         <template v-else-if="name === 'plans'"><path d="M4 5h16M4 12h16M4 19h16"/><circle cx="8" cy="5" r="2" fill="currentColor" stroke="none"/><circle cx="16" cy="12" r="2" fill="currentColor" stroke="none"/><circle cx="10" cy="19" r="2" fill="currentColor" stroke="none"/></template>
         <template v-else-if="name === 'services'"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 4V2M16 4V2M8 10h8M8 14h5"/></template>
-        <template v-else-if="name === 'licenses'"><circle cx="8" cy="15" r="4"/><path d="m11 12 8-8 2 2-2 2 1.5 1.5-2 2L17 10l-3 3"/></template>
+        <template v-else-if="name === 'licenses' || name === 'installations'"><circle cx="8" cy="15" r="4"/><path d="m11 12 8-8 2 2-2 2 1.5 1.5-2 2L17 10l-3 3"/></template>
+        <template v-else-if="name === 'subscriptions'"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 8h10M7 12h10M7 16h6"/></template>
+        <template v-else-if="name === 'organization'"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 10h.01M15 10h.01M9 14h.01M15 14h.01M10 21v-3h4v3"/></template>
         <template v-else-if="name === 'profile'"><circle cx="12" cy="8" r="4"/><path d="M4 22a8 8 0 0 1 16 0"/></template>
         <template v-else><circle cx="12" cy="12" r="9"/><path d="M9 12h6"/></template>
     </svg>
 </template>
-

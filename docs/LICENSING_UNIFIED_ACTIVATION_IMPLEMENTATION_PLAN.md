@@ -10,7 +10,10 @@ Provide one consistent installation activation experience across products:
 - A product installation is activated using one installation-specific activation code.
 - The code is exchanged once for a revocable installation credential and a signed entitlement snapshot.
 - Licensing requires no customer-managed `.env` variables, generated environment file, machine token, or manual endpoint setup. The package uses product-specific package configuration and KernelBridge's public endpoint defaults; per-install credentials are stored in the package's protected runtime state.
-- Direct-license customers and customers using a product's own platform account can both create and manage installations.
+- KernelBridge is authoritative for activation, installation licensing records and credentials, entitlements, renewal, seat accounting, and licensing revocation for every product.
+- For a platform-account activation, the product platform owns its activated-account workflow and product-domain device inventory (for example, MarketLens businesses, Business Servers, and business-app devices). It brokers activation through KernelBridge; KernelBridge still performs activation and retains the installation/licensing state needed to enforce the license. In Hybrid mode, platform-account installations follow this boundary and direct installations follow the direct-product boundary below.
+- For a product without a platform account, KernelBridge's customer portal is the management surface for installation/device information associated with the installed client application.
+- For platform-enabled products, the KernelBridge portal may also display and manage the linked installation's licensing state. This complements rather than replaces the product platform's richer business and device records.
 - The installed licensing package supplies the product's activation screen and mode-appropriate activation journey; the product should not build a separate licensing screen.
 - KernelBridge alone determines each product's licensing model and whether or when it migrates to another model.
 - KernelBridge remains authoritative for subscriptions, licensing policy, activation limits, entitlements, model transitions, and revocation.
@@ -26,6 +29,7 @@ This plan does not claim that a customer-controlled host can be made tamper-proo
 - **Product platform:** The product-owned application and its customer accounts, tenants, and operational data. KernelBridge integrates with these platforms for licensing but does not become their identity provider or operational system of record by default.
 - **Subscription/license:** KernelBridge's commercial entitlement for a customer and product.
 - **Installation:** One running product deployment with its own stable installation UUID.
+- **Product device record:** A product-platform record describing a business-owned server, workstation, or app device. It is distinct from KernelBridge's installation record and credential, even when both refer to the same deployment.
 - **Activation code:** A high-entropy, single-use capability used to bind one installation to a license. It is not the recurring API credential.
 - **Installation credential:** A revocable, installation-scoped secret issued after code redemption and used for verification and management.
 - **Business account claim:** The link between a KernelBridge license and an authenticated account in a product's own platform. It is not itself a device activation.
@@ -46,7 +50,7 @@ The following policy defaults were confirmed before implementation:
 1. KernelBridge has a code-based installation exchange at `/api/v1/installations/activate`, installation-bearer verification at `/api/v1/installations/verify`, signed Ed25519 entitlement snapshots, same-install retry, and a shared allocator for legacy activations, grants, installations, and reserved codes.
 2. Product licensing mode, runtime type, policy revision, KernelBridge admin controls, and audit history are implemented. Existing installations remain compatible and new issuance is gated by the centrally configured product mode.
 3. The unified lifecycle now supports installation-credential self-deactivation and customer-portal revocation. Both release the seat; portal revocation is ownership-checked and audited. Credential rotation/recovery, transfer, and admin recovery are not implemented.
-4. A new platform-link path uses a product-scoped `licensing:account-link` credential, records the backend's tenant-membership assertion as a pending request, and requires the KernelBridge license owner to approve in the customer portal before installation codes can be issued. The primary customer user can unlink an approved account; linked installations and unused codes are revoked immediately and their seats released. Legacy platform claims still accept externally supplied business identifiers and are not trusted as proof for this new path.
+4. A new platform-link path uses a product-scoped `licensing:account-link` credential and records the trusted product backend's account/license association. A valid request activates the link immediately; no separate KernelBridge owner approval is required. The platform owns customer authentication and its business/device inventory, while KernelBridge issues installation-bound codes and retains the linked installation/licensing state. The primary customer user can unlink an account; linked installations and unused codes are revoked immediately and their seats released. Legacy platform claims still accept externally supplied business identifiers and are not trusted as proof for this new path.
 5. Per-installation legacy-to-unified migration mappings/status, resumable policy-transition operations, and trusted deduplication of overlapping legacy activation/grant records are not implemented.
 6. Entitlement snapshots now carry a monotonic entitlement revision, content digest, product licensing mode, policy revision, and policy effective timestamp. Revisions advance on entitlement edits and scheduled effective-time boundaries.
 7. Activation-code and installation-credential HMACs support dedicated key identifiers and overlapping keys through KernelBridge server configuration; legacy rows without key IDs remain verifiable while their original application key is retained. Encrypted credential recovery and activation retry still depend on Laravel `APP_KEY`; encryption-key rotation/recovery remains unresolved.
@@ -63,16 +67,16 @@ The installed Laravel or TypeScript licensing package must provide the activatio
 KernelBridge's effective product licensing mode determines the experience:
 
 - **Direct mode:** The screen accepts the installation-specific KernelBridge activation code and exchanges it through the common code-redemption flow.
-- **Platform-account mode:** The screen starts the product's platform-account journey using the product's existing authentication, then shows link/approval and activation status. The trusted product backend performs the scoped KernelBridge link request and installation-code exchange; its machine credential remains server-side and is never placed in the package UI, browser, or desktop bundle.
+- **Platform-account mode:** The screen starts the product's platform-account journey using the product's existing authentication, then shows link and activation status. The trusted product backend performs the scoped KernelBridge link request and installation-code exchange; its machine credential remains server-side and is never placed in the package UI, browser, or desktop bundle.
 - **Hybrid mode:** The package may present both supported journeys only when KernelBridge has explicitly configured `hybrid` as the effective mode. The UI must not let customers switch the product's policy or expose a flow that KernelBridge has disabled.
 
-The package must handle pending, approved, rejected, inactive, and failed states with actionable messages. It must not bypass owner approval for platform links, invent or request product backend credentials from end users, or imply that successful platform sign-in alone activates a KernelBridge license.
+The package must handle legacy pending/rejected, inactive, and failed states with actionable messages. A trusted backend must validate a license before linking; product-platform sign-in alone must not be treated as proof of a KernelBridge license. Do not request product backend credentials from end users.
 
 ### 4.2 Common first activation
 
 1. The package displays its mode-appropriate activation screen inside the product. Direct mode uses an installation-code field; platform-account mode starts the product's platform sign-in/broker flow; hybrid mode may offer both configured paths.
 2. The runtime-appropriate SDK supplies its product code and public KernelBridge API URL from package/product configuration. These values identify the service; they are not secrets.
-3. The SDK creates or loads a stable installation UUID in storage appropriate to the runtime. In direct mode, it submits the installation code, product code, and limited device metadata. In platform-account mode, the trusted product backend obtains an installation-bound code after account-link approval, and the package presents/consumes that code for the same installation.
+3. The SDK creates or loads a stable installation UUID in storage appropriate to the runtime. In direct mode, it submits the installation code, product code, and limited device metadata. In platform-account mode, the trusted product backend obtains an installation-bound code after the license is linked, and the package presents/consumes that code for the same installation.
 4. KernelBridge validates and consumes the code atomically, binds it to the installation and license, checks the shared installation limit, and issues a revocable installation credential.
 5. KernelBridge returns public license/subscription/installation identifiers, status, expiry, entitlement revision, signed entitlements, and the installation credential.
 6. The client stores the credential and verified state using the host runtime's secure storage. Web and desktop SDKs use different storage adapters but the same logical state and security requirements. It never writes credentials to a generated `.env` file.
@@ -106,25 +110,27 @@ The package must expose clear extension points and safe defaults without forcing
 
 ### 4.5 Direct-license customer
 
-The customer purchases or receives a KernelBridge subscription. KernelBridge generates an installation code for each authorized installation. The customer enters that code in the product being activated. KernelBridge's customer portal shows installation status, usage, revoke/transfer actions, and replacement-code issuance.
+The customer purchases or receives a KernelBridge subscription. KernelBridge generates an installation code for each authorized installation. The customer enters that code in the product being activated. KernelBridge owns the complete licensing lifecycle and its customer portal is the authoritative place to view and manage the installed client's licensing-level device information, installation status, seat usage, revocation, and replacement-code issuance.
 
 ### 4.6 Product-platform account customer
 
 1. The customer signs in to the product's own platform using its normal account authentication.
-2. The trusted product backend verifies that the signed-in user is authorized to manage the tenant, then submits a link request for the public license UUID and tenant UUID using its KernelBridge-managed `licensing:account-link` credential. This is a backend assertion, not proof supplied by a browser.
-3. KernelBridge creates a pending link. The KernelBridge customer/license owner reviews and approves or rejects the request in the customer portal. A pending or rejected link cannot request installation codes.
-4. After approval, the product backend requests a short-lived activation code bound to the approved link and exact installation UUID. The code is shown only in that target installation and is redeemed through the common first-activation flow.
-5. The primary customer/license owner can unlink an approved account in the customer portal. Unlinking revokes the link, its active installations, and its unused activation codes in one transaction; installation credentials are invalidated and their seats are released immediately. A replacement link must be requested and approved again. Account-link transfer is not implemented.
+2. The trusted product backend verifies that the signed-in user may manage the product account and its devices, then submits the trusted license/account association using its KernelBridge-managed `licensing:account-link` credential. This is a backend assertion, not proof supplied by a browser.
+3. KernelBridge validates the license and product policy, creates or retrieves the account link, and makes a valid trusted link active immediately. No separate KernelBridge owner approval is required.
+4. The product platform owns its account's business, branch, Business Server, and business-app device records and its customer-facing device-management workflow. It requests a short-lived installation code from KernelBridge for the specific target installation; KernelBridge binds and redeems the code, creates the licensing installation, checks seats, and issues the installation credential and signed entitlements.
+5. KernelBridge remains authoritative for renewal, entitlement state, license-level installation status, seats, and revocation. Its customer portal may show and manage the linked installation's licensing-level state; it must not become the source of truth for the platform's business/device records. Unlinking an account in KernelBridge revokes the link, its active installations, and unused codes in one transaction, invalidates installation credentials, and releases seats. A replacement association is made through a new trusted platform link request. Account-link transfer is not implemented.
 
-The platform's server-to-server credential stays in server-side secret storage. It is never included in the product package, product `.env` download, browser response, desktop bundle, or installation credential. Customer approval protects the KernelBridge license owner; the backend credential attests only that the registered product server made the request.
+The platform's server-to-server credential stays in server-side secret storage. It is never included in the product package, product `.env` download, browser response, desktop bundle, or installation credential. KernelBridge authorizes the product backend's licensing integration; the platform remains responsible for authenticating its users and authorizing its own account/device operations.
 
 ### 4.7 KernelBridge control plane and product-platform boundary
 
-KernelBridge should centrally manage the product registry and licensing control plane. For each product, KernelBridge is authoritative for its product identity, supported runtime/SDK integrations, licensing model, policy revisions, subscriptions/licenses, activation codes, installation/seat records, account-link authorization, entitlements, and model-migration lifecycle. Only KernelBridge can set or change licensing policy and initiate or execute a licensing-model migration.
+KernelBridge centrally manages the product registry and licensing control plane. For every product, KernelBridge is authoritative for activation-code issuance and redemption, installation licensing records and credentials, subscriptions/licenses, renewal and expiry, seat accounting, entitlements, account-link authorization, revocation, licensing policy revisions, and model migration. Only KernelBridge can set or change licensing policy and initiate or execute a licensing-model migration.
 
-The product platform remains authoritative for its own customer identity, authentication, business/tenant membership, roles, and operational data. KernelBridge should store only the minimum external identifiers and verified account-link state needed to associate a KernelBridge subscription with that product account. Account credentials and product-domain records should not be copied into KernelBridge. The product platform proves account ownership to KernelBridge through a scoped server-to-server integration; KernelBridge validates that integration and records the resulting license/account relationship.
+For a platform-account activation, the product platform is authoritative for its customer identity, authentication, activated account, business/tenant membership, roles, and product-domain device inventory and metadata (such as Business Server and business-app devices in MarketLens). The platform decides which of its authorized devices should be activated and brokers that activation to KernelBridge. KernelBridge stores only the minimum external identifiers and link state required to associate the license and enforce licensing; it must not copy platform credentials or replace the platform's business/device records. The platform proves its account/license association through a scoped server-to-server integration, and KernelBridge validates it before licensing an installation. In Hybrid mode, direct installations use the direct-product management boundary while platform-linked installations use the platform-account boundary.
 
-This separation lets KernelBridge make licensing consistent across Laravel web applications and TypeScript desktop applications without forcing every product to move its user platform into KernelBridge. KernelBridge may provide a shared customer portal for KernelBridge billing, license, and installation management, while the product retains its own application login and business workflows. Any future central identity or shared account feature should be a separate, explicit product decision with its own security, privacy, and migration design—not an implicit consequence of licensing integration.
+For a product without a platform account, KernelBridge owns the customer-facing management of device information associated with installed client applications, as well as the licensing decisions and lifecycle. For a platform-enabled product, installation-level licensing information may be visible/manageable in both systems for their respective purposes: the product platform owns the business/device record and its workflow; KernelBridge owns the license-bound installation, credential, seat, entitlement, renewal, and revocation state. The two records must be linked by stable public identifiers, not treated as competing sources of truth.
+
+This separation lets KernelBridge make licensing consistent across products without forcing every product to move its user platform into KernelBridge. Any future central identity or shared account feature should be a separate, explicit product decision with its own security, privacy, and migration design—not an implicit consequence of licensing integration.
 
 ### 4.8 Offline and recurring operation
 
@@ -196,9 +202,9 @@ Freeze the exact API schema before package upgrades. The implemented operations 
 - `POST /api/v1/installations/activate`: redeem a one-time code and bind an installation.
 - `POST /api/v1/installations/verify`: authenticate with installation credential and return a signed current state.
 - `POST /api/v1/installations/deactivate`: deactivate the authenticated installation and release its seat.
-- `POST /api/v1/platform/account-links/requests`: create or retrieve a pending tenant-link request using the exact `licensing:account-link` product API scope.
-- `GET /api/v1/platform/account-links/{link}`: poll link approval status for the calling product.
-- `POST /api/v1/platform/account-links/{link}/activation-codes`: issue or replace an installation-bound code only for an approved link; replacing an unused code retains its reserved seat.
+- `POST /api/v1/platform/account-links/requests`: create or retrieve a platform-account link using the exact `licensing:account-link` product API scope; valid trusted requests are active immediately.
+- `GET /api/v1/platform/account-links/{link}`: retrieve the link status for the calling product.
+- `POST /api/v1/platform/account-links/{link}/activation-codes`: issue or replace an installation-bound code only for an active link; replacing an unused code retains its reserved seat.
 
 Still required:
 
@@ -228,7 +234,7 @@ Define explicit lifecycle operations for a damaged server, reinstalled desktop a
 - [x] Confirm activation-code lifecycle: 24-hour expiry, issuance reserves one seat, and replacement revokes the unused code while retaining the seat.
 - [x] Confirm web/server and desktop activations share one installation pool. The shared allocator takes the maximum of the legacy license activation cap and applicable `max_installations` / `max_server_installations` entitlements so migration does not silently reduce existing allowances.
 - [x] Confirm customer-initiated unified installation deactivation/revocation releases its seat immediately.
-- [x] Confirm platform-link requests require a trusted product-backend assertion and KernelBridge customer/license-owner approval.
+- [x] Confirm platform-link requests require a trusted product-backend assertion and an active KernelBridge license; no separate customer approval is required.
 - [x] Confirm unlinking a platform account immediately revokes linked installations and releases their seats.
 - [ ] Confirm account-link transfer/reset rules, offline policy, and model-change semantics.
 - Inventory products and deployment variants by runtime type (Laravel web/server, TypeScript desktop main process, platform backend, or browser-only frontend), SDK/package version, storage capability, subscription/license states, API clients, current direct activations, business claims, grants, deployment profiles, and product environment values.
@@ -243,7 +249,7 @@ Define explicit lifecycle operations for a damaged server, reinstalled desktop a
 - [x] Record code issuance/replacement in the audit log without recording the plaintext activation code.
 - [x] Implement the shared transactional seat allocator across legacy direct activations, existing platform grants, new installations, and unredeemed activation-code reservations.
 - [x] Enforce product mode for new activations: direct mode issues codes instead of reusable-key activations or new platform grants; existing active activations/grants remain compatible.
-- [x] Add pending/approved platform account-link records, a narrowly scoped product backend credential preset, customer-owner approval/rejection, and installation-bound code issuance.
+- [x] Add platform account-link records, a narrowly scoped product backend credential preset, legacy approval/rejection handling, and installation-bound code issuance. New valid links are active immediately.
 - [x] Add primary-customer-owner platform unlink with transactional revocation of active linked installations and unused codes, immediate seat release, and audit records.
 - [x] Add versioned HMAC key identifiers and overlapping verification keys for activation codes, unified installation credentials, and legacy platform grants while retaining compatibility for existing rows.
 - [ ] Add migration mapping/status records for legacy activations and grants.
@@ -251,7 +257,7 @@ Define explicit lifecycle operations for a damaged server, reinstalled desktop a
 - [ ] Add credential rotation/recovery, transfer, admin recovery, and migration actions with idempotency, rate limits, audit records, and safe secret redaction. Keep policy and migration controls restricted to authorized KernelBridge operators.
 - [x] Preserve existing v1 endpoints; add the short-rate-limited `/api/v1/installations/activate` code-exchange endpoint and installation-credential verification. The exchange returns a signed entitlement snapshot, and same-install retries return the same credential.
 
-The new platform-account linking and unlinking paths are implemented, but legacy claims remain compatible and are not proof for the new path. Do not select `platform_account` for rollout until product-backend deployment, customer approval UX, transfer policy, migration accounting, and SDK handling are ready.
+The new platform-account linking and unlinking paths are implemented, but legacy claims remain compatible and are not proof for the new path. Do not select `platform_account` for rollout until product-backend deployment, transfer policy, migration accounting, and SDK handling are ready.
 
 Do not switch a product to `direct` until its compatible licensing SDK has been deployed: direct mode stops new reusable-key activations. Existing active installations remain compatible, and pre-issued 24-hour codes can still be redeemed.
 
@@ -269,8 +275,8 @@ Do not switch a product to `direct` until its compatible licensing SDK has been 
 
 - Move the TypeScript SDK into the shared SDK repository alongside the Laravel package, and implement the same code-entry/activation workflow and state transitions, supported optional desktop UI adapter, main-process-only credential handling, and OS-vault storage as specified in the SDK repository plan.
 - Implement the same API contract and state transitions for Spring Boot and Django clients, with runtime-specific credential storage adapters and identity lifecycles.
-- Add a reference product-backend integration for one platform product, including authenticated tenant assertion, KernelBridge customer approval UX, approved-link polling, installation-bound code delivery, and clear pending/rejected states.
-- Implement account unlink/transfer only after the policy for already activated installations and seat release is approved.
+- Add a reference product-backend integration for one platform product, including authenticated tenant assertion, immediate link activation, installation-bound code delivery, and clear handling for legacy pending/rejected states.
+- Account unlink is implemented with immediate licensing revocation and seat release. Implement account transfer only after ownership verification and migration rules for already activated installations are approved.
 - Ensure untrusted browser clients and desktop renderers never receive platform integration or installation credentials. Document a backend-brokered activation pattern for browser-only products.
 - Add SDK conformance fixtures that run against the same activation, renewal, revocation, and migration scenarios.
 
@@ -306,7 +312,7 @@ Do not switch a product to `direct` until its compatible licensing SDK has been 
 - Exchange idempotency: a simulated lost response and retry from the same installation returns a usable state without consuming another seat; a different installation cannot replay that code.
 - Installation binding: same-install retry is idempotent; another installation consumes another seat; device/installation replacement follows policy.
 - Seat integrity: mixed legacy activation/grant/new credential paths cannot exceed the license limit, including concurrent requests.
-- Account path: unauthenticated/arbitrary tenant linking is rejected; trusted product backend can request a link; only the KernelBridge license owner can approve it; installation-code issuance is blocked until approval and bound to the target installation UUID. Primary license owners can unlink, immediately revoking linked installations and codes and releasing seats. Transfer requires separate ownership/migration policy.
+- Account path: unauthenticated/arbitrary tenant linking is rejected; a trusted product backend can link an active license to its authorized account without a second KernelBridge approval; the platform owns its business/device inventory and chooses which authorized device to activate; KernelBridge binds the code and installation to the account/license, checks seats, issues entitlements, and supports licensing-level status/revocation. Primary license owners can unlink, immediately revoking linked installations and codes and releasing seats. Transfer requires separate ownership/migration policy.
 - Model changes: direct, platform-account, and hybrid transitions preserve valid installations; dry-run, retries, rollback, and partial migration work.
 - Runtime boundaries: Laravel credentials remain server-side; desktop credentials are unavailable to renderer code and use the approved secure-storage adapter; browser-only clients never receive reusable credentials; installation identity survives updates and handles reinstall/restore according to policy.
 - New-product onboarding: registering a product and installing its supported SDK is sufficient for the standard activation and entitlement lifecycle; custom product code is needed only for documented integration/presentation extension points or a trusted platform-account broker.
@@ -325,11 +331,11 @@ Confirmed before implementation: activation codes expire after 24 hours; issuanc
 
 Also confirmed: customer-initiated unified installation deactivation/revocation releases the seat immediately.
 
-Also confirmed: platform-account links require trusted product-backend attestation and KernelBridge customer/license-owner approval before bound installation codes can be issued.
+Updated decision (2026-11-04): platform-account links require a trusted product-backend request and active KernelBridge license, but no separate customer/license-owner approval. Legacy pending links can be completed by repeating the trusted link request. KernelBridge owns licensing activation, installation state, entitlements, and renewal. Platform-enabled products own their activated-account workflows and product-domain device inventory; KernelBridge retains and may manage the associated licensing installation records. For products without a platform account, KernelBridge manages the installed client's device information in its customer portal.
 
-Also confirmed: unlinking a platform account immediately revokes its active installations and unused codes and releases their reserved seats; a future association requires a new owner-approved link.
+Also confirmed: unlinking a platform account immediately revokes its active installations and unused codes and releases their reserved seats; a future association requires a new trusted platform link request.
 
-Still to resolve: offline-grace defaults and tier limits; per-license code allocation and customer/admin issuance policy; account-link transfer rules; governance/approval requirements for licensing policy changes; migration overlap and legacy API retirement criteria; package registry choices and protocol capability negotiation. Before SDK upgrades, complete the remaining key rotation/recovery design, migration mapping/operations, and cross-runtime conformance contract. The first SDK release may support the new platform path only if its UI exposes pending/approved/rejected states and cannot issue codes before approval.
+Still to resolve: offline-grace defaults and tier limits; per-license code allocation and customer/admin issuance policy; account-link transfer rules; governance/approval requirements for licensing policy changes; migration overlap and legacy API retirement criteria; package registry choices and protocol capability negotiation. Before SDK upgrades, complete the remaining key rotation/recovery design, migration mapping/operations, and cross-runtime conformance contract. The first SDK release must validate the active account link before requesting installation codes; legacy pending/rejected statuses remain actionable.
 
 ## Related documentation
 

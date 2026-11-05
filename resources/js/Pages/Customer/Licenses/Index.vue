@@ -29,17 +29,15 @@ const purchaseEdunexa = () => edunexaForm.post(route('portal.licenses.edunexa.pu
 const deactivate = activation => { if (confirm('Deactivate this installation? Device-bound licences remain assigned to this computer.')) router.post(route('portal.licenses.activations.deactivate', activation.uuid)); };
 const issueActivationCode = (license, replaceCodeUuid = null) => router.post(route('portal.licenses.activation-codes.issue', license.uuid), replaceCodeUuid ? { replace_code_uuid: replaceCodeUuid } : {});
 const revokeInstallation = installation => { if (confirm('Revoke this installation? Its seat will become available for another installation.')) router.post(route('portal.licenses.installations.revoke', installation.uuid)); };
-const approvePlatformLink = link => { if (confirm('Approve this product platform account? It will be able to request installation activation codes for this license.')) router.post(route('portal.platform-account-links.approve', link.uuid)); };
-const rejectPlatformLink = link => { if (confirm('Reject this product platform account-link request?')) router.post(route('portal.platform-account-links.reject', link.uuid)); };
 const revokePlatformLink = link => { if (confirm('Unlink this platform account? All of its active installations will be revoked and their seats released immediately.')) router.post(route('portal.platform-account-links.revoke', link.uuid)); };
 const copy = async key => { try { await navigator.clipboard.writeText(key); } catch { alert('Select and copy the activation key manually.'); } };
 </script>
 
 <template>
-    <Head title="Licensing" />
+    <Head title="Installations" />
     <PortalLayout area="Customer Portal">
-        <template #navigation><CustomerNavigation active="licenses" /></template>
-        <div class="mb-6"><h1 class="text-3xl font-bold">Licensing</h1><p class="mt-2 text-slate-600">Choose an EduNexa plan or MediFlow packages, pay your invoice, and activate your computer.</p></div>
+        <template #navigation><CustomerNavigation active="installations" /></template>
+        <div class="mb-6"><h1 class="text-3xl font-bold">Installations and activation</h1><p class="mt-2 text-slate-600">Generate one-time installation codes and manage computers connected to your licenses.</p></div>
         <p v-if="$page.props.flash.success" class="success-message mb-5">{{ $page.props.flash.success }}</p>
         <section v-if="$page.props.flash.activation_code" class="mb-5 rounded-xl border border-emerald-300 bg-emerald-50 p-5"><h2 class="font-bold text-emerald-900">New installation activation code</h2><p class="mt-1 text-sm text-emerald-800">This code is shown once. It expires after 24 hours and can be used for one installation.</p><div class="mt-3 flex flex-wrap items-center gap-3"><code class="rounded-lg bg-white px-3 py-2 font-bold ring-1 ring-emerald-300">{{ $page.props.flash.activation_code.code }}</code><button type="button" class="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-bold text-white" @click="copy($page.props.flash.activation_code.code)">Copy code</button></div><p class="mt-2 text-xs text-emerald-800">Expires {{ dateTime($page.props.flash.activation_code.expires_at) }}</p></section>
         <p v-if="$page.props.errors.activation" role="alert" class="mb-5 text-red-700">{{ $page.props.errors.activation }}</p>
@@ -87,7 +85,7 @@ const copy = async key => { try { await navigator.clipboard.writeText(key); } ca
                     <ul v-if="license.activation_codes.length" class="mt-4 space-y-2 text-sm">
                         <li v-for="code in license.activation_codes" :key="code.uuid" class="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white p-3">
                             <span class="font-semibold uppercase">{{ code.status }}<span v-if="code.status === 'issued'"> · expires {{ dateTime(code.expires_at) }}</span></span>
-                            <button v-if="code.status === 'issued'" type="button" class="font-bold text-cyan-800 underline" @click="issueActivationCode(license, code.uuid)">Replace lost code</button>
+                            <button v-if="['issued', 'expired'].includes(code.status)" type="button" class="font-bold text-cyan-800 underline" @click="issueActivationCode(license, code.uuid)">{{ code.status === 'expired' ? 'Generate replacement code' : 'Replace lost code' }}</button>
                         </li>
                     </ul>
                 </div>
@@ -96,7 +94,7 @@ const copy = async key => { try { await navigator.clipboard.writeText(key); } ca
                     <ul class="mt-3 divide-y divide-violet-200 text-sm">
                         <li v-for="link in license.platform_account_links" :key="link.uuid" class="flex flex-wrap items-center justify-between gap-3 py-3">
                             <span><strong class="uppercase">{{ link.status }}</strong> · Account {{ link.business_uuid }}<span v-if="link.requested_at"> · requested {{ dateTime(link.requested_at) }}</span></span>
-                            <span v-if="link.status === 'pending'" class="flex gap-3"><button type="button" class="font-bold text-emerald-800 underline" @click="approvePlatformLink(link)">Approve link</button><button type="button" class="font-bold text-red-700 underline" @click="rejectPlatformLink(link)">Reject</button></span>
+                            <span v-if="link.status === 'pending'" class="text-slate-600">Reconnect the product account to complete this earlier request.</span>
                             <button v-else-if="link.status === 'approved'" type="button" class="font-bold text-red-700 underline" @click="revokePlatformLink(link)">Unlink and revoke installations</button>
                         </li>
                     </ul>

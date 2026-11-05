@@ -13,6 +13,7 @@ final class LicenseInstallation extends Model
         'software_license_id',
         'product_id',
         'license_platform_account_link_id',
+        'entitlement_source',
         'installation_uuid',
         'business_uuid',
         'credential_hash',

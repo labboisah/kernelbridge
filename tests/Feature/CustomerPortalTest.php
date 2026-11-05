@@ -85,7 +85,72 @@ final class CustomerPortalTest extends TestCase
         $this->get(route('portal.payments.index'))->assertOk()->assertInertia(fn (Assert $page) => $page->component('Customer/Payments/Index')->has('payments', 0));
     }
 
-    public function test_customer_services_include_client_app_setup_template_for_registered_services(): void
+    public function test_customer_subscription_screen_shows_only_linked_subscription_information_and_change_action(): void
+    {
+        [$user, $customer] = $this->account('subscription@example.com', 'KBT-CUS-000023');
+        [, $other] = $this->account('subscription-outsider@example.com', 'KBT-CUS-000024');
+        $plan = Plan::query()->where('slug', 'basic')->firstOrFail();
+        $subscription = Subscription::factory()->create([
+            'customer_id' => $customer->id,
+            'product_id' => $plan->product_id,
+            'plan_id' => $plan->id,
+            'status' => 'active',
+            'created_by' => $user->id,
+        ]);
+        Subscription::factory()->create([
+            'customer_id' => $other->id,
+            'product_id' => $plan->product_id,
+            'plan_id' => $plan->id,
+            'status' => 'active',
+            'created_by' => $user->id,
+        ]);
+
+        $this->actingAs($user)->get(route('portal.subscriptions.index'))->assertOk()->assertInertia(fn (Assert $page) => $page
+            ->component('Customer/Subscriptions/Index')
+            ->has('subscriptions', 1)
+            ->where('subscriptions.0.uuid', $subscription->uuid)
+            ->where('subscriptions.0.product', $plan->product->name)
+            ->where('subscriptions.0.plan', $plan->name)
+            ->where('subscriptions.0.change_url', route('portal.services.edit', $subscription))
+            ->missing('subscriptions.1'));
+    }
+
+    public function test_customer_organization_screen_shows_only_linked_account_details(): void
+    {
+        [$user, $customer] = $this->account('organization@example.com', 'KBT-CUS-000025');
+        [, $other] = $this->account('organization-outsider@example.com', 'KBT-CUS-000026');
+        $customer->update([
+            'type' => 'organization',
+            'name' => 'Example Hospital',
+            'website' => 'https://hospital.example',
+            'tax_id' => 'TAX-123',
+            'billing_address' => '12 Health Avenue',
+            'city' => 'Lagos',
+            'state' => 'Lagos',
+            'country' => 'NG',
+        ]);
+        $customer->contacts()->create([
+            'name' => 'Primary Contact',
+            'job_title' => 'Administrator',
+            'email' => 'contact@hospital.example',
+            'phone' => '+2348000000000',
+            'is_primary' => true,
+        ]);
+
+        $this->actingAs($user)->get(route('portal.organization.index'))->assertOk()->assertInertia(fn (Assert $page) => $page
+            ->component('Customer/Organization/Index')
+            ->has('organizations', 1)
+            ->where('organizations.0.name', 'Example Hospital')
+            ->where('organizations.0.type', 'organization')
+            ->where('organizations.0.website', 'https://hospital.example')
+            ->where('organizations.0.tax_id', 'TAX-123')
+            ->where('organizations.0.contacts.0.name', 'Primary Contact')
+            ->where('organizations.0.contacts.0.email', 'contact@hospital.example')
+            ->missing('organizations.1'))
+            ->assertDontSee($other->name);
+    }
+
+    public function test_customer_services_do_not_expose_client_app_setup_values(): void
     {
         [$user, $customer] = $this->account('setup@example.com', 'KBT-CUS-000022');
         $plan = Plan::query()->where('slug', 'basic')->firstOrFail();
@@ -95,16 +160,7 @@ final class CustomerPortalTest extends TestCase
 
         $this->actingAs($user)->get(route('portal.services.index'))->assertOk()->assertInertia(fn (Assert $page) => $page
             ->component('Customer/Services/Index')
-            ->where('services.0.client_setup.product_code', $plan->product->code)
-            ->where('services.0.client_setup.api_url', rtrim((string) config('app.url'), '/').'/api/v1')
-            ->where('services.0.client_setup.has_license', true)
-            ->where('services.0.client_setup.env', fn (string $env): bool => str_contains($env, 'KERNELBRIDGE_PRODUCT_CODE='.$plan->product->code)
-                && str_contains($env, 'KERNELBRIDGE_API_TOKEN=replace-with-product-machine-token')
-                && str_contains($env, 'KERNELBRIDGE_CACHE_SIGNING_KEY=replace-with-independent-long-random-secret')
-                && str_contains($env, 'KERNELBRIDGE_PROTECT_WEB_ROUTES=true'))
-            ->where('services.0.client_setup.composer_commands', fn (string $commands): bool => str_contains($commands, 'composer require kernelbridge/licensing-client-laravel:^1.0'))
-            ->where('services.0.client_setup.route_middleware', fn (string $code): bool => str_contains($code, 'kernelbridge.subscription.active'))
-            ->where('services.0.client_setup.license_key', fn (?string $key): bool => is_string($key) && str_starts_with($key, 'KBT-')));
+            ->missing('services.0.client_setup'));
     }
 
     public function test_direct_license_issues_a_one_time_installation_code_without_showing_the_legacy_key(): void
@@ -132,7 +188,7 @@ final class CustomerPortalTest extends TestCase
             'source_plan_id' => $plan->id,
             'effective_from' => now()->subDay(),
         ]);
-        LicenseActivationCode::query()->create([
+        $expiredCode = LicenseActivationCode::query()->create([
             'software_license_id' => $license->id,
             'product_id' => $product->id,
             'code_lookup' => hash_hmac('sha256', 'EXPIRED-CODE', (string) config('app.key')),
@@ -148,7 +204,9 @@ final class CustomerPortalTest extends TestCase
             ->where('licenses.0.uuid', $license->uuid)
             ->where('licenses.0.activation_codes.0.status', 'expired'));
 
-        $response = $this->from(route('portal.licenses.index'))->post(route('portal.licenses.activation-codes.issue', $license->uuid));
+        $response = $this->from(route('portal.licenses.index'))->post(route('portal.licenses.activation-codes.issue', $license->uuid), [
+            'replace_code_uuid' => $expiredCode->uuid,
+        ]);
         $response->assertRedirect(route('portal.licenses.index'));
         $activationCode = session('activation_code');
 
@@ -161,6 +219,14 @@ final class CustomerPortalTest extends TestCase
         $this->assertSame('issued', $storedCode->status);
         $this->assertTrue(Hash::check($activationCode['code'], $storedCode->code_hash));
         $this->assertSame($user->id, $storedCode->issued_by);
+        $this->assertSame('revoked', $expiredCode->fresh()->status);
+        $this->assertSame($storedCode->id, $expiredCode->fresh()->replaced_by_id);
+        $this->get(route('portal.licenses.index'))->assertInertia(fn (Assert $page) => $page
+            ->where('flash.activation_code.code', $activationCode['code'])
+            ->where('flash.activation_code.license_uuid', $license->uuid)
+            ->has('flash.activation_code.expires_at'));
+        $this->get(route('portal.licenses.index'))->assertInertia(fn (Assert $page) => $page
+            ->where('flash.activation_code', null));
         $this->assertDatabaseHas('audit_logs', [
             'event' => 'license.activation_code.issued',
             'actor_id' => $user->id,
@@ -348,14 +414,15 @@ final class CustomerPortalTest extends TestCase
         $plan = Plan::query()->where('slug', 'basic')->firstOrFail();
         Http::fake(['https://api.flutterwave.com/v3/payments' => Http::response(['status' => 'success', 'data' => ['link' => 'https://checkout.flutterwave.test/pay/123']])]);
 
-        $this->actingAs($user)->post(route('portal.services.store'), ['product_uuid' => $plan->product->uuid, 'plan_uuid' => $plan->uuid, 'auto_renew' => true])->assertRedirect();
+        $this->actingAs($user)->withHeader('X-Inertia', 'true')
+            ->post(route('portal.services.store'), ['product_uuid' => $plan->product->uuid, 'plan_uuid' => $plan->uuid, 'auto_renew' => true])
+            ->assertStatus(409)->assertHeader('X-Inertia-Location', 'https://checkout.flutterwave.test/pay/123');
         $invoice = Invoice::query()->firstOrFail();
         $subscription = Subscription::query()->firstOrFail();
 
-        $this->post(route('portal.invoices.pay-online', $invoice))->assertRedirect('https://checkout.flutterwave.test/pay/123');
         $reference = Payment::query()->where('provider', 'flutterwave')->value('transaction_reference');
         Http::fake(['https://api.flutterwave.com/v3/transactions/98765/verify' => Http::response(['status' => 'success', 'data' => ['id' => 98765, 'status' => 'successful', 'amount' => $invoice->total, 'currency' => $plan->currency, 'tx_ref' => $reference, 'payment_type' => 'card']])]);
-        $this->get(route('payments.flutterwave.callback', ['status' => 'successful', 'tx_ref' => $reference, 'transaction_id' => '98765']))->assertRedirect(route('portal.invoices.show', $invoice));
+        $this->flushHeaders()->get(route('payments.flutterwave.callback', ['status' => 'successful', 'tx_ref' => $reference, 'transaction_id' => '98765']))->assertRedirect(route('portal.invoices.show', $invoice));
         $this->get(route('payments.flutterwave.callback', ['status' => 'successful', 'tx_ref' => $reference, 'transaction_id' => '98765']))->assertRedirect(route('portal.invoices.show', $invoice));
 
         $this->assertSame('paid', $invoice->fresh()->status->value);

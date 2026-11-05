@@ -73,7 +73,7 @@ watch(() => form.product_uuid, () => { form.plan_uuid = ''; });
             <p v-else-if="form.product_uuid && !availablePlans.length" class="my-5 rounded-xl bg-amber-50 p-4 text-sm text-amber-800">No public plans are currently available for this service. Please contact sales for a tailored quotation.</p>
 
             <label class="flex items-center gap-3"><input v-model="form.auto_renew" type="checkbox" class="rounded border-slate-300 text-[#0797A5] focus:ring-[#0797A5]" /><span>Automatically renew this service</span></label>
-            <div class="mt-6 flex gap-3"><button class="form-button" :disabled="form.processing || !selectedPlan">Create service request</button><Link :href="route('portal.services.index')" class="rounded-xl border px-6 py-3">Cancel</Link></div>
+            <div class="mt-6 flex gap-3"><button class="form-button" :disabled="form.processing || !selectedPlan">{{ form.processing ? 'Preparing invoice...' : 'Create invoice and continue to payment' }}</button><Link :href="route('portal.services.index')" class="rounded-xl border px-6 py-3">Cancel</Link></div>
         </form>
     </PortalLayout>
 </template>

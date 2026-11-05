@@ -136,6 +136,7 @@ class CheckoutTest extends TestCase
 
     public function test_paid_setup_is_encrypted_private_and_api_token_is_subscription_restricted(): void
     {
+        $this->plan->product->forceFill(['licensing_mode' => 'direct'])->save();
         $invoice = $this->order();
         $subscription = Subscription::sole();
         $this->get(route('portal.services.environment', $subscription))->assertNotFound();
@@ -148,7 +149,10 @@ class CheckoutTest extends TestCase
             ->assertSee('KERNELBRIDGE_LICENSE_REDIRECT_AFTER_ACTIVATION=/configuration')
             ->assertSee('KERNELBRIDGE_LICENSE_BRAND_NAME=MediFlow')
             ->assertSee('KERNELBRIDGE_LICENSE_HEADING=Secure access for your care team.');
-        $this->get(route('portal.invoices.show', $invoice))->assertInertia(fn (Assert $p) => $p->has('clientSetup.license_key')->has('clientSetup.download_url'));
+        $this->get(route('portal.invoices.show', $invoice))->assertInertia(fn (Assert $p) => $p
+            ->where('clientSetup.activation_ready', true)
+            ->missing('clientSetup.license_key')
+            ->missing('clientSetup.download_url'));
         app(PaidLicenseService::class)->complete($invoice->fresh(), $this->owner);
         $this->assertDatabaseCount('client_setup_bundles', 1);
         $this->assertDatabaseCount('api_client_credentials', 1);
@@ -195,7 +199,7 @@ class CheckoutTest extends TestCase
 
         $subscription = Subscription::sole();
         $bundle = ClientSetupBundle::sole();
-        $this->withToken($bundle->secrets['api_token'])->postJson('/api/v1/licenses/activate', [
+        $response = $this->withToken($bundle->secrets['api_token'])->postJson('/api/v1/licenses/activate', [
             'license_key' => app(LicenseService::class)->key($subscription->license),
             'device_id' => 'edunexa-module-installation',
             'machine_fingerprint' => str_repeat('a', 64),
@@ -210,6 +214,20 @@ class CheckoutTest extends TestCase
         ])->assertCreated()
             ->assertJsonPath('data.status', 'active')
             ->assertJsonPath('data.configuration.packages.0.key', 'core-school-operations');
+        $expectedEntitlements = collect($subscription->metadata['licensed_entitlements'])->pluck('key')->sort()->values()->all();
+        $expectedPackageFeatures = collect($expectedEntitlements)->reject(fn (string $key): bool => $key === 'max_users')->sort()->values()->all();
+        $storedEntitlements = $subscription->entitlements()->whereNull('effective_until')->pluck('feature_key')->sort()->values()->all();
+        $returnedEntitlements = collect($response->json('data.entitlements.entitlements'))->pluck('key')->sort()->values()->all();
+        $configuration = collect($response->json('data.configuration.packages'));
+        $availableModuleFeatures = $configuration->flatMap(fn (array $module): array => [
+            'module_'.\Illuminate\Support\Str::snake($module['key']),
+            ...array_column($module['features'], 'key'),
+        ])->sort()->values()->all();
+        $configuredEntitlements = collect($response->json('data.configuration.entitlements'))->pluck('key')->sort()->values()->all();
+        $this->assertSame($expectedEntitlements, $storedEntitlements);
+        $this->assertSame($expectedEntitlements, $returnedEntitlements);
+        $this->assertSame($expectedEntitlements, $configuredEntitlements);
+        $this->assertSame($expectedPackageFeatures, $availableModuleFeatures);
         $activation = $subscription->license->activations()->sole();
         $this->assertSame('https://school.example.test', data_get($activation->metadata, 'device_info.platform_url'));
         $this->assertSame('EDUNEXA-SCHOOL-01', $activation->device_name);

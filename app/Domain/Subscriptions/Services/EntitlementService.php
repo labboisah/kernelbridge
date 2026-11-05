@@ -14,9 +14,39 @@ final class EntitlementService
             ->where(fn ($query) => $query->whereNull('effective_until')->orWhere('effective_until', '>', $now))
             ->get()
             ->each(fn ($entitlement) => $entitlement->update(['effective_until' => $now]));
+        if (is_array($snapshot = data_get($subscription->metadata, 'licensed_entitlements'))) {
+            foreach ($snapshot as $entitlement) {
+                if (! is_array($entitlement) || ! is_string($entitlement['key'] ?? null)) {
+                    continue;
+                }
+
+                $subscription->entitlements()->create([
+                    'feature_key' => $entitlement['key'],
+                    'feature_name' => $entitlement['name'] ?? $entitlement['key'],
+                    'enabled' => (bool) ($entitlement['enabled'] ?? true),
+                    'limit_value' => $entitlement['limit'] ?? null,
+                    'source_plan_id' => $entitlement['source_plan_id'] ?? $plan->id,
+                    'effective_from' => $now,
+                ]);
+            }
+
+            return;
+        }
+
         if (is_array($modules = data_get($subscription->metadata, 'licensed_modules'))) {
-            foreach ($modules as $module) {
-                $subscription->entitlements()->create(['feature_key' => $module, 'feature_name' => config('mediflow.modules.'.$module, $module), 'enabled' => true, 'limit_value' => null, 'source_plan_id' => $plan->id, 'effective_from' => $now]);
+            $features = $plan->features()->whereIn('feature_key', $modules)->get()->keyBy('feature_key');
+            $limits = $plan->limits()->whereIn('limit_key', $modules)->get()->keyBy('limit_key');
+            foreach (array_unique($modules) as $module) {
+                $feature = $features->get($module);
+                $limit = $limits->get($module);
+                $subscription->entitlements()->create([
+                    'feature_key' => $module,
+                    'feature_name' => $feature?->feature_name ?? $limit?->limit_name ?? config('mediflow.modules.'.$module, $module),
+                    'enabled' => true,
+                    'limit_value' => $feature?->limit_value ?? $limit?->limit_value,
+                    'source_plan_id' => $plan->id,
+                    'effective_from' => $now,
+                ]);
             }
 
             return;

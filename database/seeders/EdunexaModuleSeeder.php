@@ -19,10 +19,24 @@ final class EdunexaModuleSeeder extends Seeder
             'professional' => ['core-school-operations', 'admission-and-enrollment', 'academic-records-and-results', 'finance-and-fees'],
             'enterprise' => array_column(config('edunexa.modules', []), 'key'),
         ];
+        $tierUserLimits = ['basic' => '5', 'professional' => '25', 'enterprise' => 'unlimited'];
+        $managedFeatureKeys = ['max_users'];
+        foreach (config('edunexa.modules', []) as $module) {
+            $managedFeatureKeys[] = 'module_'.Str::snake($module['key']);
+            foreach ($module['features'] as $feature) {
+                $managedFeatureKeys[] = Str::snake($module['key'].'_'.$feature['name']);
+            }
+        }
 
         foreach ($tierModules as $slug => $included) {
             $plan = Plan::query()->where('product_id', $product->id)->where('slug', $slug)->first();
             if (! $plan) continue;
+
+            $plan->features()->whereNotIn('feature_key', $managedFeatureKeys)->delete();
+            $plan->features()->updateOrCreate(['feature_key' => 'max_users'], [
+                'feature_name' => 'Administrative users', 'enabled' => true,
+                'limit_value' => $tierUserLimits[$slug], 'sort_order' => 0,
+            ]);
 
             foreach (config('edunexa.modules', []) as $moduleIndex => $module) {
                 $moduleEnabled = in_array($module['key'], $included, true) && $module['status'] === 'ready';

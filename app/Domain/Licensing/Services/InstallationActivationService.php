@@ -3,17 +3,18 @@
 namespace App\Domain\Licensing\Services;
 
 use App\Domain\Audit\Contracts\AuditRecorder;
+use App\Domain\Licensing\Exceptions\InstallationVerificationException;
 use App\Models\LicenseActivationCode;
 use App\Models\LicenseInstallation;
 use App\Models\LicensePlatformAccountLink;
 use App\Models\Product;
 use App\Models\SoftwareLicense;
 use App\Models\User;
-use App\Domain\Licensing\Exceptions\InstallationVerificationException;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
@@ -39,8 +40,7 @@ final class InstallationActivationService
         ?LicensePlatformAccountLink $platformLink = null,
         ?string $apiClientUuid = null,
         ?string $deviceName = null,
-    ): array
-    {
+    ): array {
         return DB::transaction(function () use ($license, $issuedBy, $replaceCodeUuid, $boundInstallationUuid, $platformLink, $apiClientUuid, $deviceName): array {
             $license = SoftwareLicense::query()
                 ->with(['subscription.entitlements', 'subscription.plan.features', 'subscription.plan.limits', 'product'])
@@ -79,9 +79,9 @@ final class InstallationActivationService
                     ->lockForUpdate()
                     ->first();
 
-                if (! $replacedCode || $replacedCode->status !== 'issued' || $replacedCode->expires_at->isPast()) {
+                if (! $replacedCode || $replacedCode->status !== 'issued') {
                     throw ValidationException::withMessages([
-                        'activation_code' => 'Only an unused, unexpired activation code can be replaced.',
+                        'activation_code' => 'Only an unused activation code can be replaced.',
                     ]);
                 }
             }
@@ -94,6 +94,7 @@ final class InstallationActivationService
                 'software_license_id' => $license->id,
                 'product_id' => $license->product_id,
                 'license_platform_account_link_id' => $platformIssued ? $platformLink->id : null,
+                'entitlement_source' => $platformIssued ? 'product_platform' : 'direct',
                 'bound_installation_uuid' => $boundInstallationUuid,
                 'device_name' => $deviceName,
                 'issued_by' => $issuedBy?->id,
@@ -231,11 +232,14 @@ final class InstallationActivationService
             }
 
             if (! $installation) {
+                $entitlementSource = $activationCode->entitlement_source
+                    ?? $this->legacyActivationCodeSource($activationCode);
                 $initialDigest = $this->secretHasher->hash(Str::random(64));
                 $installation = LicenseInstallation::query()->create([
                     'software_license_id' => $license->id,
                     'product_id' => $license->product_id,
                     'license_platform_account_link_id' => $activationCode->license_platform_account_link_id,
+                    'entitlement_source' => $entitlementSource,
                     'installation_uuid' => $data['installation_uuid'],
                     'business_uuid' => $activationCode->platformAccountLink?->business_uuid,
                     'device_name' => $data['device_name'] ?? $activationCode->device_name,
@@ -356,8 +360,28 @@ final class InstallationActivationService
         $license = $installation->license;
         $subscription = $this->snapshots->refreshRevision($license->subscription);
         $items = $this->snapshots->items($subscription);
+        $framework = null;
+        if (config('entitlement_framework.shadow_enabled') || config('entitlement_framework.snapshot_enabled')) {
+            $shadow = app(EntitlementFrameworkShadowResolver::class)->resolve($installation, $items->all());
+            if (config('entitlement_framework.shadow_enabled')) {
+                Log::info('entitlement_framework.shadow_comparison', $shadow['diagnostics']);
+            }
+            if (config('entitlement_framework.snapshot_enabled')) {
+                if ($shadow['status'] === 'resolved' && $shadow['lifecycle_eligible']) {
+                    $framework = [
+                        'schema_version' => 1,
+                        'source' => $shadow['source'],
+                        'catalog_revision' => $shadow['catalog_revision'],
+                        'source_revision' => $shadow['source_revision'],
+                        'grants' => (object) $shadow['grants'],
+                    ];
+                } else {
+                    Log::warning('entitlement_framework.snapshot_not_attached', $shadow['diagnostics']);
+                }
+            }
+        }
 
-        return $this->signer->sign([
+        $payload = [
             'version' => 1,
             'issued_at' => now()->toIso8601String(),
             'product_code' => strtoupper((string) $installation->product->code),
@@ -378,7 +402,12 @@ final class InstallationActivationService
             'entitlements' => $items->all(),
             'entitlement_revision' => $subscription->entitlement_revision,
             'entitlement_digest' => hash('sha256', $items->toJson()),
-        ]);
+        ];
+        if ($framework !== null) {
+            $payload['entitlement_framework'] = $framework;
+        }
+
+        return $this->signer->sign($payload);
     }
 
     /**
@@ -415,5 +444,20 @@ final class InstallationActivationService
         ])->save();
 
         return $credential;
+    }
+
+    private function legacyActivationCodeSource(LicenseActivationCode $activationCode): ?string
+    {
+        if ($activationCode->license_platform_account_link_id !== null) {
+            return 'product_platform';
+        }
+
+        $product = $activationCode->product;
+        if ($product->licensing_mode_changed_at
+            && $product->licensing_mode_changed_at->gt($activationCode->created_at)) {
+            return null;
+        }
+
+        return in_array($product->licensing_mode, ['direct', 'hybrid'], true) ? 'direct' : null;
     }
 }

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Domain\Licensing\Exceptions\PlatformAccountLinkException;
+use App\Domain\Licensing\Services\LicenseService;
 use App\Domain\Licensing\Services\PlatformAccountLinkService;
 use App\Http\Controllers\Controller;
 use App\Support\ApiResponse;
@@ -11,15 +12,27 @@ use Illuminate\Http\Request;
 
 final class PlatformAccountLinkController extends Controller
 {
-    public function request(Request $request, PlatformAccountLinkService $links): JsonResponse
+    public function request(Request $request, PlatformAccountLinkService $links, LicenseService $licenses): JsonResponse
     {
         $data = $request->validate([
-            'license_uuid' => ['required', 'uuid'],
+            'license_uuid' => ['nullable', 'uuid', 'required_without:activation_code'],
+            'activation_code' => ['nullable', 'string', 'max:255', 'required_without:license_uuid'],
             'business_uuid' => ['required', 'uuid'],
         ]);
+        if (filled($data['activation_code'] ?? null) === filled($data['license_uuid'] ?? null)) {
+            return ApiResponse::error(
+                $request,
+                'invalid_account_link_request',
+                'Provide either a license UUID or an activation code, but not both.',
+                422,
+            );
+        }
 
         try {
-            $link = $links->request($request->attributes->get('api_client'), $data['license_uuid'], $data['business_uuid']);
+            $client = $request->attributes->get('api_client');
+            $link = isset($data['activation_code'])
+                ? $links->requestWithActivationCode($client, $licenses, $data['activation_code'], $data['business_uuid'])
+                : $links->request($client, $data['license_uuid'], $data['business_uuid']);
         } catch (PlatformAccountLinkException $exception) {
             return ApiResponse::error($request, $exception->errorCode, $exception->getMessage(), $exception->status);
         }

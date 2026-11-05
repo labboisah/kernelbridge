@@ -204,6 +204,28 @@ final class PackageChangeService
         $metadata['package_prices'] = $rows;
         $metadata['primary_package'] = in_array($metadata['primary_package'] ?? null, $keys, true) ? $metadata['primary_package'] : ($keys[0] ?? null);
         $metadata['licensed_modules'] = array_values(array_unique(array_merge([], ...array_map(fn ($row) => array_column($row['configuration']['features'], 'key'), $rows))));
+        $licensedEntitlements = [];
+        foreach ($rows as $row) {
+            foreach ($row['configuration']['features'] as $feature) {
+                $licensedEntitlements[$feature['key']] = [
+                    'key' => $feature['key'],
+                    'name' => $feature['name'],
+                    'enabled' => (bool) ($feature['enabled'] ?? true),
+                    'limit' => $feature['limit'] ?? null,
+                    'source_plan_id' => $row['plan_id'],
+                ];
+            }
+            foreach ($row['configuration']['limits'] ?? [] as $limit) {
+                $licensedEntitlements[$limit['key']] = [
+                    'key' => $limit['key'],
+                    'name' => $limit['name'],
+                    'enabled' => (bool) ($limit['enabled'] ?? true),
+                    'limit' => $limit['limit'] ?? null,
+                    'source_plan_id' => $row['plan_id'],
+                ];
+            }
+        }
+        $metadata['licensed_entitlements'] = array_values($licensedEntitlements);
         $metadata['configuration_revision'] = ($metadata['configuration_revision'] ?? 1) + 1;
         $primary = collect($rows)->firstWhere('key', $metadata['primary_package']);
         $subscription->update(['metadata' => $metadata, 'plan_id' => $primary['plan_id'] ?? $subscription->plan_id,

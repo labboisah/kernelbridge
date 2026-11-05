@@ -42,6 +42,7 @@ final readonly class PackagePurchaseService
             $items = app(ImplementationPricing::class)->lines($implementation, $primary->product_id);
             $recurringMinor = 0;
             $modules = [];
+            $licensedEntitlements = [];
             foreach ($plans as $plan) {
                 $recurringMinor += $this->minor($plan->price);
                 $items[] = ['product_id' => $plan->product_id, 'plan_id' => $plan->id, 'description' => 'MediFlow - '.$plan->name, 'quantity' => 1, 'unit_price' => $plan->price, 'discount' => 0, 'tax' => 0];
@@ -50,6 +51,18 @@ final readonly class PackagePurchaseService
                 }
                 $packageModules = array_column(app(PackageCatalog::class)->plan($plan)['features'], 'key');
                 $modules = array_merge($modules, $packageModules);
+                foreach ($plan->features()->where('enabled', true)->get() as $feature) {
+                    $licensedEntitlements[$feature->feature_key] = [
+                        'key' => $feature->feature_key, 'name' => $feature->feature_name,
+                        'enabled' => true, 'limit' => $feature->limit_value, 'source_plan_id' => $plan->id,
+                    ];
+                }
+                foreach ($plan->limits()->get() as $limit) {
+                    $licensedEntitlements[$limit->limit_key] = [
+                        'key' => $limit->limit_key, 'name' => $limit->limit_name,
+                        'enabled' => true, 'limit' => $limit->limit_value, 'source_plan_id' => $plan->id,
+                    ];
+                }
             }
             $invoice = $this->invoices->create([
                 'customer_id' => $customer->id, 'issue_date' => today(), 'due_date' => today()->addDays(7),
@@ -64,6 +77,7 @@ final readonly class PackagePurchaseService
                     'selected_packages' => $plans->pluck('slug')->values()->all(),
                     'package_names' => $plans->pluck('name')->values()->all(),
                     'licensed_modules' => array_values(array_unique($modules)),
+                    'licensed_entitlements' => array_values($licensedEntitlements),
                     'package_prices' => $plans->map(fn (Plan $p) => ['uuid' => $p->uuid, 'key' => $p->slug, 'price' => $p->price, 'setup_fee' => $p->setup_fee, 'configuration' => app(PackageCatalog::class)->plan($p)])->all(),
                 ],
             ]);

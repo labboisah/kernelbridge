@@ -4,9 +4,12 @@ namespace Tests\Feature\Admin;
 
 use App\Domain\Subscriptions\Services\PlanEntitlementService;
 use App\Enums\UserRole;
+use App\Models\EntitlementCatalogRevision;
+use App\Models\EntitlementPlanMapping;
 use App\Models\Plan;
 use App\Models\Product;
 use App\Models\User;
+use App\Support\CanonicalJson;
 use Database\Seeders\PlanSeeder;
 use Database\Seeders\ProductSeeder;
 use Database\Seeders\RoleAndPermissionSeeder;
@@ -35,6 +38,24 @@ final class PlanManagementTest extends TestCase
         $this->assertSame(25, $service->limit($professional, 'max_users'));
         $this->assertNull($service->limit($professional, 'missing_limit'));
         $this->assertDatabaseHas('product_plan', ['product_id' => $professional->product_id, 'plan_id' => $professional->id]);
+    }
+
+    public function test_edunexa_tier_plans_use_only_their_configured_modules_and_features(): void
+    {
+        $product = Product::query()->where('code', 'EDUNEXA')->firstOrFail();
+        $professional = $product->subscriptionPlans()->where('slug', 'professional')->firstOrFail();
+        $featureKeys = $professional->features()->pluck('feature_key')->all();
+        $enabledKeys = $professional->features()->where('enabled', true)->pluck('feature_key')->all();
+
+        $this->assertContains('max_users', $enabledKeys);
+        $this->assertContains('module_core-school-operations', $enabledKeys);
+        $this->assertContains('module_admission-and-enrollment', $enabledKeys);
+        $this->assertContains('module_academic-records-and-results', $enabledKeys);
+        $this->assertContains('module_finance-and-fees', $enabledKeys);
+        $this->assertNotContains('module_inventory-and-stock-control', $enabledKeys);
+        $this->assertNotContains('academic_administration', $featureKeys);
+        $this->assertNotContains('learner_engagement', $featureKeys);
+        $this->assertSame('25', $professional->features()->where('feature_key', 'max_users')->value('limit_value'));
     }
 
     public function test_administrator_can_manage_plans_with_features_limits_and_audit_logs(): void
@@ -86,6 +107,116 @@ final class PlanManagementTest extends TestCase
         $this->actingAs($customer)->post(route('admin.products.plans.store', $product), $this->payload())->assertForbidden();
         $this->actingAs($customer)->put(route('admin.plans.update', $plan), $this->payload())->assertForbidden();
         $this->actingAs($customer)->delete(route('admin.plans.destroy', $plan))->assertForbidden();
+    }
+
+    public function test_administrator_can_map_a_direct_plan_through_catalog_hierarchy(): void
+    {
+        $admin = $this->administrator();
+        $product = Product::query()->where('code', 'MEDIFLOW')->firstOrFail();
+        $product->forceFill(['licensing_mode' => 'direct'])->save();
+        $plan = $product->subscriptionPlans()->firstOrFail();
+        $catalog = EntitlementCatalogRevision::query()->create([
+            'product_id' => $product->id,
+            'schema_version' => 1,
+            'catalog_revision' => 1,
+            'catalog' => [
+                'schema_version' => 1,
+                'product_code' => $product->code,
+                'catalog_revision' => 1,
+                'packages' => [[
+                    'key' => 'clinical',
+                    'modules' => [[
+                        'key' => 'pharmacy',
+                        'capabilities' => [
+                            ['key' => 'mediflow.module.pharmacy', 'type' => 'capability', 'description' => 'Pharmacy access'],
+                            ['key' => 'mediflow.branches.max', 'type' => 'limit', 'unit' => 'branches', 'scope' => 'business'],
+                        ],
+                    ]],
+                ]],
+                'plans' => [],
+            ],
+            'catalog_digest' => str_repeat('a', 64),
+            'published_at' => now(),
+        ]);
+        $grants = [
+            'mediflow.module.pharmacy' => ['type' => 'capability', 'enabled' => true],
+            'mediflow.branches.max' => [
+                'type' => 'limit',
+                'state' => 'finite',
+                'value' => 3,
+                'unit' => 'branches',
+                'scope' => 'business',
+            ],
+        ];
+
+        $this->withoutVite();
+        $this->actingAs($admin)
+            ->get(route('admin.plans.entitlements', $plan))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Admin/Plans/Entitlements')
+                ->where('catalog.revision', 1)
+                ->where('catalog.groups.0.key', 'clinical')
+                ->where('catalog.groups.0.modules.0.key', 'pharmacy')
+                ->where('catalog.groups.0.modules.0.capabilities.0.key', 'mediflow.module.pharmacy'));
+
+        $this->actingAs($admin)
+            ->put(route('admin.plans.entitlements.publish', $plan), ['grants' => $grants])
+            ->assertRedirect(route('admin.plans.entitlements', $plan));
+
+        $mapping = EntitlementPlanMapping::query()->where('plan_id', $plan->id)->firstOrFail();
+        $this->assertSame(1, $mapping->source_revision);
+        $this->assertSame($catalog->id, $mapping->entitlement_catalog_revision_id);
+        $this->assertSame($grants, $mapping->grants);
+        $this->assertSame(CanonicalJson::digest(json_decode(json_encode($grants), false)), $mapping->mapping_digest);
+    }
+
+    public function test_direct_plan_mapping_rejects_grants_outside_the_published_catalog(): void
+    {
+        $admin = $this->administrator();
+        $product = Product::query()->where('code', 'MEDIFLOW')->firstOrFail();
+        $product->forceFill(['licensing_mode' => 'direct'])->save();
+        $plan = $product->subscriptionPlans()->firstOrFail();
+        EntitlementCatalogRevision::query()->create([
+            'product_id' => $product->id,
+            'schema_version' => 1,
+            'catalog_revision' => 1,
+            'catalog' => [
+                'schema_version' => 1,
+                'product_code' => $product->code,
+                'catalog_revision' => 1,
+                'packages' => [[
+                    'key' => 'clinical',
+                    'modules' => [[
+                        'key' => 'pharmacy',
+                        'capabilities' => [['key' => 'mediflow.module.pharmacy', 'type' => 'capability']],
+                    ]],
+                ]],
+                'plans' => [],
+            ],
+            'catalog_digest' => str_repeat('a', 64),
+            'published_at' => now(),
+        ]);
+
+        $this->actingAs($admin)
+            ->put(route('admin.plans.entitlements.publish', $plan), [
+                'grants' => ['unknown.grant' => ['type' => 'capability', 'enabled' => true]],
+            ])
+            ->assertSessionHasErrors('grants');
+
+        $this->assertDatabaseCount('entitlement_plan_mappings', 0);
+    }
+
+    public function test_platform_account_plans_do_not_expose_direct_entitlement_mapping(): void
+    {
+        $admin = $this->administrator();
+        $product = Product::query()->where('code', 'MEDIFLOW')->firstOrFail();
+        $product->forceFill(['licensing_mode' => 'platform_account'])->save();
+        $plan = $product->subscriptionPlans()->firstOrFail();
+
+        $this->actingAs($admin)
+            ->get(route('admin.plans.entitlements', $plan))
+            ->assertNotFound();
     }
 
     public function test_plan_input_requires_supported_billing_and_unique_feature_keys(): void

@@ -48,6 +48,16 @@ After a business claim, the MarketLens Platform uses `POST /licenses/installatio
 
 The current `KernelBridgeLicenseClient` still uses `license_key` on its device activation/verification endpoints and does not yet consume installation-grant credentials. Do not pass the owner's master activation code to a Business Server or configure this grant as a product-wide token. The grant-authenticated Server activation and verification client flow is a required follow-up before these grants are used for production enforcement.
 
+## Licensing and device-management ownership
+
+KernelBridge owns the licensing lifecycle for every product: activation-code issuance and redemption, the authoritative installation licensing record and credential, seat accounting, entitlement decisions, renewal/expiry, and licensing revocation.
+
+- **Platform-account activation:** The product platform owns its activated-account workflow and product-domain records for businesses, branches, Business Servers, and business-app devices. It authenticates and authorizes its users, chooses which authorized device to activate, and brokers that device's activation through KernelBridge. KernelBridge creates and manages the licensing installation and may show/revoke that licensing record in its own customer portal. KernelBridge's record is not a replacement for the platform's richer device inventory. In Hybrid mode, this applies to platform-linked installations; direct installations use the direct-product management boundary.
+- **Product without a platform account:** KernelBridge's customer portal owns the management surface for installed-client device information and licensing installations.
+- **Renewal:** KernelBridge remains the authority for license renewal and resulting expiry/entitlement state in both cases. A product platform may provide a convenient customer workflow or link, but it does not independently extend a KernelBridge license.
+
+Where both systems display information about one platform-enabled device, link the records using stable public identifiers and keep ownership clear: platform device metadata belongs to the platform; license status, installation credential, seat, entitlement, and expiry belong to KernelBridge.
+
 ## Local State
 
 Each client stores exactly one local state record per product code. The storage backend is framework-specific, but the logical fields are shared:
@@ -236,6 +246,4 @@ The Django package provides:
 - scheduled verification hook compatible with Celery/cron through `kernelbridge_verify`;
 - renewal notice context helper;
 - Django service and middleware tests with a fake KernelBridge client.
-
-
 

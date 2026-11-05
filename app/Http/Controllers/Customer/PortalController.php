@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Customer;
 
 use App\Domain\Finance\Services\CustomerCreditService;
+use App\Domain\Finance\Services\FlutterwavePaymentService;
 use App\Domain\Finance\Services\InvoiceManager;
 use App\Domain\Finance\Services\PaymentManager;
 use App\Domain\Licensing\Services\InstallationActivationService;
@@ -31,6 +32,8 @@ use App\Models\Plan;
 use App\Models\SoftwareLicense;
 use App\Models\Subscription;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -40,7 +43,7 @@ use Inertia\Response;
 
 final class PortalController extends Controller
 {
-    public function services(Request $request, LicenseService $licenses): Response
+    public function services(Request $request): Response
     {
         $ids = $this->customerIds($request);
         $services = Subscription::query()->whereIn('customer_id', $ids)
@@ -53,9 +56,66 @@ final class PortalController extends Controller
             'plan' => $item->plan?->name, 'price' => $item->price, 'currency' => $item->currency,
             'billing_cycle' => $item->billing_cycle->value, 'starts_at' => $item->starts_at?->toDateString(),
             'ends_at' => $item->ends_at?->toDateString(), 'auto_renew' => $item->auto_renew,
-            'client_setup' => $this->clientSetupData($item, $licenses),
             'invoice' => $item->invoice ? ['uuid' => $item->invoice->uuid, 'number' => $item->invoice->invoice_number, 'status' => $item->invoice->status->value, 'total' => $item->invoice->total, 'balance' => $item->invoice->balance, 'currency' => $item->invoice->currency, 'due_date' => $item->invoice->due_date->toDateString()] : null,
         ])]);
+    }
+
+    public function subscriptions(Request $request): Response
+    {
+        $subscriptions = Subscription::query()->whereIn('customer_id', $this->customerIds($request))
+            ->with(['product:id,name,code', 'plan:id,name', 'customer:id,name'])
+            ->latest()->get();
+
+        return Inertia::render('Customer/Subscriptions/Index', [
+            'subscriptions' => $subscriptions->map(fn (Subscription $subscription): array => [
+                'uuid' => $subscription->uuid,
+                'number' => $subscription->subscription_number,
+                'status' => $subscription->status->value,
+                'product' => $subscription->product?->name,
+                'product_code' => $subscription->product?->code,
+                'plan' => $subscription->plan?->name,
+                'packages' => data_get($subscription->metadata, 'package_names', []),
+                'price' => $subscription->price,
+                'currency' => $subscription->currency,
+                'billing_cycle' => $subscription->billing_cycle->value,
+                'starts_at' => $subscription->starts_at?->toDateString(),
+                'ends_at' => $subscription->ends_at?->toDateString(),
+                'auto_renew' => $subscription->auto_renew,
+                'change_url' => $subscription->product?->code === 'MEDIFLOW'
+                    ? route('portal.licenses.index').'#packages-'.$subscription->uuid
+                    : route('portal.services.edit', $subscription),
+            ]),
+        ]);
+    }
+
+    public function organization(Request $request): Response
+    {
+        $organizations = $request->user()->customers()->with('contacts')->get();
+
+        return Inertia::render('Customer/Organization/Index', [
+            'organizations' => $organizations->map(fn (Customer $customer): array => [
+                'uuid' => $customer->uuid,
+                'customer_number' => $customer->customer_number,
+                'type' => $customer->type->value,
+                'name' => $customer->name,
+                'email' => $customer->email,
+                'phone' => $customer->phone,
+                'website' => $customer->website,
+                'tax_id' => $customer->tax_id,
+                'billing_address' => $customer->billing_address,
+                'city' => $customer->city,
+                'state' => $customer->state,
+                'country' => $customer->country,
+                'status' => $customer->status->value,
+                'contacts' => $customer->contacts->map(fn ($contact): array => [
+                    'name' => $contact->name,
+                    'job_title' => $contact->job_title,
+                    'email' => $contact->email,
+                    'phone' => $contact->phone,
+                    'is_primary' => $contact->is_primary,
+                ]),
+            ]),
+        ]);
     }
 
     public function createService(Request $request): Response
@@ -69,7 +129,7 @@ final class PortalController extends Controller
         ]);
     }
 
-    public function storeService(StoreServiceRequest $request, SubscriptionService $service, InvoiceManager $invoices): RedirectResponse
+    public function storeService(StoreServiceRequest $request, SubscriptionService $service, InvoiceManager $invoices, FlutterwavePaymentService $payments): \Symfony\Component\HttpFoundation\Response
     {
         $customer = $this->primaryCustomer($request);
         $plan = Plan::query()->publiclyAvailable()->whereNotNull('price')->with('product')->where('uuid', $request->validated('plan_uuid'))
@@ -77,7 +137,7 @@ final class PortalController extends Controller
         if ($plan->product->code === 'MEDIFLOW') {
             $invoice = app(PackagePurchaseService::class)->purchase($customer, [$plan->uuid], $request->user());
 
-            return redirect()->route('portal.invoices.show', $invoice)->with('success', 'Invoice prepared. Complete payment to receive your activation code.');
+            return $this->startOnlinePayment($request, $invoice, $payments);
         }
         $duplicate = Subscription::query()->where('customer_id', $customer->id)->where('product_id', $plan->product_id)
             ->whereIn('status', ['pending', 'trial', 'active', 'grace', 'suspended'])->exists();
@@ -95,7 +155,27 @@ final class PortalController extends Controller
         });
         $invoices->issue($invoice, $request->user());
 
-        return redirect()->route('portal.invoices.show', $invoice)->with('success', 'Service and invoice created. Pay online to activate your service.');
+        return $this->startOnlinePayment($request, $invoice, $payments);
+    }
+
+    private function startOnlinePayment(Request $request, Invoice $invoice, FlutterwavePaymentService $payments): \Symfony\Component\HttpFoundation\Response
+    {
+        $invoiceUrl = route('portal.invoices.show', $invoice);
+        if (! filled(config('services.flutterwave.secret_key'))) {
+            return redirect($invoiceUrl)->with('error', 'Your invoice was created, but online payment is not configured. You can still view the invoice and submit payment proof.');
+        }
+
+        try {
+            $checkoutUrl = $payments->initialize($invoice, $request->user());
+        } catch (ConnectionException|RequestException $exception) {
+            report($exception);
+
+            return redirect($invoiceUrl)->with('error', 'Your invoice was created, but online checkout could not be started. Open the invoice to retry or submit payment proof.');
+        }
+
+        return $request->header('X-Inertia')
+            ? Inertia::location($checkoutUrl)
+            : redirect()->away($checkoutUrl);
     }
 
     public function editService(Request $request, Subscription $subscription): Response
@@ -357,8 +437,24 @@ final class PortalController extends Controller
     {
         abort_unless($request->user()->customers()->whereKey($invoice->customer_id)->exists(), 403);
         $invoice->load(['customer', 'items', 'payments']);
+        $paidSubscription = Subscription::query()->where('invoice_id', $invoice->id)->whereHas('license')->with('product')->first();
+        $clientSetup = $paidSubscription
+            && ClientSetupBundle::where('subscription_id', $paidSubscription->id)->exists()
+            && $invoice->status->value === 'paid'
+                ? (in_array($paidSubscription->product?->licensing_mode, ['direct', 'hybrid'], true)
+                    ? ['activation_ready' => true]
+                    : ['license_key' => app(LicenseService::class)->key($paidSubscription->license)])
+                : null;
 
-        return Inertia::render('Invoices/CustomerView', ['invoice' => $invoice, 'clientSetup' => ($paidSubscription = Subscription::where('invoice_id', $invoice->id)->whereHas('license')->first()) && ClientSetupBundle::where('subscription_id', $paidSubscription->id)->exists() && $invoice->status->value === 'paid' ? ['license_key' => app(LicenseService::class)->key($paidSubscription->license), 'download_url' => route('portal.services.environment', $paidSubscription)] : null, 'availableCredit' => CustomerCreditService::money(app(CustomerCreditService::class)->balance($invoice->customer_id, $invoice->currency)), 'canPayOnline' => filled(config('services.flutterwave.secret_key')) && in_array($invoice->status->value, ['issued', 'partially_paid', 'overdue'], true) && (float) $invoice->balance > 0, 'portal' => true]);
+        return Inertia::render('Invoices/CustomerView', [
+            'invoice' => $invoice,
+            'clientSetup' => $clientSetup,
+            'availableCredit' => CustomerCreditService::money(app(CustomerCreditService::class)->balance($invoice->customer_id, $invoice->currency)),
+            'canPayOnline' => filled(config('services.flutterwave.secret_key'))
+                && in_array($invoice->status->value, ['issued', 'partially_paid', 'overdue'], true)
+                && (float) $invoice->balance > 0,
+            'portal' => true,
+        ]);
     }
 
     public function payments(Request $request): Response
@@ -405,44 +501,6 @@ final class PortalController extends Controller
     private function primaryCustomer(Request $request): Customer
     {
         return $request->user()->customers()->orderByDesc('customer_user.is_primary')->orderBy('customers.id')->firstOrFail();
-    }
-
-    /** @return array<string, mixed> */
-    private function clientSetupData(Subscription $subscription, LicenseService $licenses): array
-    {
-        $apiUrl = rtrim((string) config('app.url'), '/').'/api/v1';
-        $productCode = $subscription->product?->code;
-        $license = $subscription->license;
-        $licenseKey = $license ? $licenses->key($license) : null;
-        $env = implode("\n", [
-            'KERNELBRIDGE_API_URL='.$apiUrl,
-            'KERNELBRIDGE_PRODUCT_CODE='.($productCode ?: 'replace-with-product-code'),
-            'KERNELBRIDGE_API_TOKEN=replace-with-product-machine-token',
-            'KERNELBRIDGE_VERIFICATION_INTERVAL=15',
-            'KERNELBRIDGE_OFFLINE_GRACE_HOURS=72',
-            'KERNELBRIDGE_CACHE_SIGNING_KEY=replace-with-independent-long-random-secret',
-            'KERNELBRIDGE_PROTECT_WEB_ROUTES=true',
-            'KERNELBRIDGE_PROTECT_EXCEPT=login,register,password/*',
-            'KERNELBRIDGE_RENEWAL_NOTICE_ENABLED=true',
-        ]);
-
-        return [
-            'api_url' => $apiUrl,
-            'product_code' => $productCode,
-            'license_key' => $licenseKey,
-            'has_license' => (bool) $licenseKey,
-            'download_url' => ClientSetupBundle::where('subscription_id', $subscription->id)->exists() ? route('portal.services.environment', $subscription) : null,
-            'env' => $env,
-            'composer_commands' => implode("\n", [
-                'composer config repositories.kernelbridge path ../kernelbridge/packages/kernelbridge/licensing-client-laravel',
-                'composer require kernelbridge/licensing-client-laravel:^1.0',
-                'php artisan vendor:publish --tag=kernelbridge-licensing-config',
-                'php artisan vendor:publish --tag=kernelbridge-licensing-migrations',
-                'php artisan vendor:publish --tag=kernelbridge-licensing-assets',
-                'php artisan migrate',
-            ]),
-            'route_middleware' => "Route::middleware(['auth', 'kernelbridge.subscription.active'])->group(function (): void {\n    Route::get('/dashboard', DashboardController::class)->name('dashboard');\n});",
-        ];
     }
 
     /** @return array<string, mixed> */

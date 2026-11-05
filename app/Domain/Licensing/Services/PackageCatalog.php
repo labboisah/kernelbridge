@@ -43,6 +43,17 @@ final class PackageCatalog
         return [
             'schema_version' => 1, 'revision' => data_get($subscription->metadata, 'configuration_revision', 1),
             'primary_package' => data_get($subscription->metadata, 'primary_package'),
+            'entitlements' => $subscription->entitlements()
+                ->where(fn ($query) => $query->whereNull('effective_from')->orWhere('effective_from', '<=', now()))
+                ->where(fn ($query) => $query->whereNull('effective_until')->orWhere('effective_until', '>', now()))
+                ->orderBy('feature_key')
+                ->get()
+                ->map(fn ($entitlement) => [
+                    'key' => $entitlement->feature_key,
+                    'name' => $entitlement->feature_name,
+                    'enabled' => $entitlement->enabled,
+                    'limit' => $entitlement->limit_value,
+                ])->values()->all(),
             'packages' => array_map(function ($key) use ($subscription) {
                 $row = collect(data_get($subscription->metadata, 'package_prices', []))->firstWhere('key', $key);
                 $package = $row['configuration'] ?? $this->describe($key);
@@ -66,6 +77,10 @@ final class PackageCatalog
         return ['key' => $plan->slug, 'name' => $plan->name, 'description' => $plan->description,
             'uuid' => $plan->uuid, 'price' => $plan->price, 'setup_fee' => $plan->setup_fee,
             'currency' => $plan->currency, 'billing_cycle' => $plan->billing_cycle->value,
-            'features' => $features, 'modules' => $features];
+            'features' => $features, 'modules' => $features,
+            'limits' => $plan->limits()->get()->map(fn ($limit) => [
+                'key' => $limit->limit_key, 'name' => $limit->limit_name,
+                'enabled' => true, 'limit' => $limit->limit_value,
+            ])->all()];
     }
 }

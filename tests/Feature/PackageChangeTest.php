@@ -69,6 +69,51 @@ class PackageChangeTest extends TestCase
         $this->assertSame($revision, $subscription->fresh()->metadata['configuration_revision']);
     }
 
+    public function test_plan_limits_remain_aligned_after_a_package_change(): void
+    {
+        $this->pharmacy->limits()->create([
+            'limit_key' => 'max_pharmacists', 'limit_name' => 'Pharmacists',
+            'limit_value' => '10', 'metadata' => [],
+        ]);
+        $this->clinic->limits()->create([
+            'limit_key' => 'max_clinicians', 'limit_name' => 'Clinicians',
+            'limit_value' => '25', 'metadata' => [],
+        ]);
+        $subscription = $this->subscription([$this->pharmacy->uuid]);
+        $this->assertSame('10', collect($subscription->metadata['licensed_entitlements'])
+            ->firstWhere('key', 'max_pharmacists')['limit']);
+        $this->assertDatabaseHas('subscription_entitlements', [
+            'subscription_id' => $subscription->id,
+            'feature_key' => 'max_pharmacists',
+            'limit_value' => '10',
+        ]);
+
+        $invoice = app(PackageChangeService::class)->change(
+            $subscription, [$this->pharmacy->uuid, $this->clinic->uuid], $this->user, false,
+        );
+        $this->pay($invoice, $invoice->total);
+
+        $subscription = $subscription->fresh();
+        $expected = collect($subscription->metadata['licensed_entitlements'])
+            ->sortBy('key')
+            ->map(fn (array $entitlement): array => [
+                'key' => $entitlement['key'],
+                'name' => $entitlement['name'],
+                'enabled' => $entitlement['enabled'],
+                'limit' => $entitlement['limit'],
+            ])->values()->all();
+        $stored = $subscription->entitlements()->whereNull('effective_until')->orderBy('feature_key')
+            ->get()->map(fn ($entitlement): array => [
+                'key' => $entitlement->feature_key,
+                'name' => $entitlement->feature_name,
+                'enabled' => $entitlement->enabled,
+                'limit' => $entitlement->limit_value,
+            ])->all();
+
+        $this->assertSame($expected, $stored);
+        $this->assertSame($expected, app(\App\Domain\Licensing\Services\PackageCatalog::class)->configuration($subscription)['entitlements']);
+    }
+
     public function test_removal_generates_credit_once_and_preserves_shared_features(): void
     {
         $subscription = $this->subscription([$this->pharmacy->uuid, $this->clinic->uuid]);

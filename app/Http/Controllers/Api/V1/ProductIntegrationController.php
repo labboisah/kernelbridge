@@ -6,8 +6,10 @@ use App\Domain\Licensing\Services\LicenseInstallationGrantService;
 use App\Domain\Licensing\Services\LicenseService;
 use App\Domain\Licensing\Services\PackageCatalog;
 use App\Domain\Licensing\Services\EntitlementSnapshotService;
+use App\Domain\Licensing\Services\EntitlementSigner;
 use App\Http\Controllers\Controller;
 use App\Models\Subscription;
+use App\Models\Product;
 use App\Support\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -15,6 +17,24 @@ use Illuminate\Support\Facades\DB;
 
 final class ProductIntegrationController extends Controller
 {
+    public function licensingPolicy(Request $request, string $code): JsonResponse
+    {
+        $product = Product::query()
+            ->where('code', strtoupper($code))
+            ->where('status', 'active')
+            ->firstOrFail();
+
+        return ApiResponse::success($request, app(EntitlementSigner::class)->sign([
+            'version' => 1,
+            'policy_type' => 'licensing_mode',
+            'issued_at' => now()->toIso8601String(),
+            'product_code' => strtoupper((string) $product->code),
+            'licensing_mode' => $product->licensing_mode,
+            'licensing_policy_revision' => $product->licensing_policy_revision,
+            'licensing_policy_effective_at' => $product->licensing_mode_changed_at?->toIso8601String(),
+        ]));
+    }
+
     public function product(Request $request, string $code): JsonResponse
     {
         $client = $request->attributes->get('api_client');

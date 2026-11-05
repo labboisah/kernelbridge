@@ -13,6 +13,7 @@ final class LicenseActivationCode extends Model
         'software_license_id',
         'product_id',
         'license_platform_account_link_id',
+        'entitlement_source',
         'bound_installation_uuid',
         'device_name',
         'issued_by',

@@ -37,12 +37,17 @@ final class PlanSeeder extends Seeder
                     [...$data, 'currency' => 'NGN', 'setup_fee' => 0, 'trial_days' => 14, 'grace_period_days' => 7, 'is_active' => true, 'is_public' => true, 'sort_order' => $index + 1],
                 );
                 $plan->products()->syncWithoutDetaching([$product->id]);
+                if ($product->code === 'EDUNEXA') {
+                    continue;
+                }
                 $plan->features()->delete();
                 foreach ($features as $featureIndex => $feature) {
                     $plan->features()->create([...$feature, 'sort_order' => $featureIndex]);
                 }
             }
         }
+
+        app(EdunexaModuleSeeder::class)->run();
     }
 
     /** @return array<int, array<string, mixed>> */

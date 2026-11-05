@@ -38,7 +38,11 @@ class HandleInertiaRequests extends Middleware
                 'roles' => fn (): array => $request->user()?->getRoleNames()->all() ?? [],
                 'permissions' => fn (): array => $request->user()?->getAllPermissions()->pluck('name')->all() ?? [],
             ],
-            'flash' => ['success' => fn (): ?string => $request->session()->get('success'), 'error' => fn (): ?string => $request->session()->get('error')],
+            'flash' => [
+                'success' => fn (): ?string => $request->session()->get('success'),
+                'error' => fn (): ?string => $request->session()->get('error'),
+                'activation_code' => fn (): ?array => $request->session()->pull('activation_code'),
+            ],
             'app' => ['url' => config('app.url')],
             'billing' => fn (): array => ['vat_rate' => \App\Models\BillingSetting::vatRate()],
         ];
