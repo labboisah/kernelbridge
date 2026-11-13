@@ -8,10 +8,12 @@ use App\Http\Controllers\Admin\DemoModeController as AdminDemoModeController;
 use App\Http\Controllers\Admin\HostingSettingsController;
 use App\Http\Controllers\Admin\InvoiceController as AdminInvoiceController;
 use App\Http\Controllers\Admin\LeadController as AdminLeadController;
+use App\Http\Controllers\Admin\LicenseManagementController as AdminLicenseManagementController;
 use App\Http\Controllers\Admin\McpController as AdminMcpController;
 use App\Http\Controllers\Admin\PaymentController as AdminPaymentController;
 use App\Http\Controllers\Admin\PlanController as AdminPlanController;
 use App\Http\Controllers\Admin\ProductController as AdminProductController;
+use App\Http\Controllers\Admin\ProductReleaseController as AdminProductReleaseController;
 use App\Http\Controllers\Admin\QuotationController as AdminQuotationController;
 use App\Http\Controllers\Admin\StaffController as AdminStaffController;
 use App\Http\Controllers\Admin\SupportTeamController as AdminSupportTeamController;
@@ -94,6 +96,8 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
         Route::get('/checkout', [CheckoutController::class, 'show'])->name('checkout.show');
         Route::post('/checkout', [CheckoutController::class, 'store'])->middleware('throttle:10,1')->name('checkout.store');
         Route::get('/services/{subscription:uuid}/environment', [CheckoutController::class, 'environment'])->name('services.environment');
+        Route::get('/services/{subscription:uuid}/release', [CheckoutController::class, 'downloadRelease'])->name('services.release.download');
+        Route::get('/services/{subscription:uuid}/installation-guide', [CustomerPortalController::class, 'installationGuide'])->name('services.installation-guide');
         Route::get('/services', [CustomerPortalController::class, 'services'])->name('services.index');
         Route::get('/subscriptions', [CustomerPortalController::class, 'subscriptions'])->name('subscriptions.index');
         Route::get('/organization', [CustomerPortalController::class, 'organization'])->name('organization.index');
@@ -133,8 +137,8 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
     Route::prefix('admin')->name('admin.')->middleware(['role:'.implode('|', UserRole::administrative()), 'throttle:120,1'])->group(function (): void {
         Route::get('/partner-commissions', [\App\Http\Controllers\Admin\PartnerCommissionController::class, 'index'])->middleware('role:super_admin|admin')->name('partners.commissions');
         Route::put('/partner-commissions/{product:slug}', [\App\Http\Controllers\Admin\PartnerCommissionController::class, 'update'])->middleware('role:super_admin|admin')->name('partners.commissions.update');
-        Route::get('/partners', [\App\Http\Controllers\Admin\PartnerController::class, 'index'])->middleware('role:super_admin|admin')->name('partners.index');
-        Route::put('/partners/{application}', [\App\Http\Controllers\Admin\PartnerController::class, 'update'])->middleware('role:super_admin|admin')->name('partners.update');
+        Route::get('/partners', [App\Http\Controllers\Admin\PartnerController::class, 'index'])->middleware('role:super_admin|admin')->name('partners.index');
+        Route::put('/partners/{application}', [App\Http\Controllers\Admin\PartnerController::class, 'update'])->middleware('role:super_admin|admin')->name('partners.update');
         Route::get('/billing-settings', [\App\Http\Controllers\Admin\BillingSettingsController::class, 'edit'])->middleware('role:super_admin|admin')->name('billing.edit');
         Route::put('/billing-settings', [\App\Http\Controllers\Admin\BillingSettingsController::class, 'update'])->middleware('role:super_admin|admin')->name('billing.update');
         Route::get('/hosting', [HostingSettingsController::class, 'edit'])->middleware('role:super_admin|admin')->name('hosting.edit');
@@ -156,6 +160,11 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
         Route::post('/mcp/clients', [AdminMcpController::class, 'storeClient'])->middleware('role:super_admin|admin')->name('mcp.clients.store');
         Route::post('/mcp/credentials/{credential:uuid}/rotate', [AdminMcpController::class, 'rotateCredential'])->middleware('role:super_admin|admin')->name('mcp.credentials.rotate');
         Route::post('/mcp/credentials/{credential:uuid}/revoke', [AdminMcpController::class, 'revokeCredential'])->middleware('role:super_admin|admin')->name('mcp.credentials.revoke');
+        Route::get('/licenses', [AdminLicenseManagementController::class, 'index'])->middleware('role:super_admin|admin')->name('licenses.index');
+        Route::get('/licenses/{license:uuid}', [AdminLicenseManagementController::class, 'show'])->middleware('role:super_admin|admin')->name('licenses.show');
+        Route::post('/licenses/{license:uuid}/codes', [AdminLicenseManagementController::class, 'issueCode'])->middleware('role:super_admin|admin')->name('licenses.codes.issue');
+        Route::post('/licenses/{license:uuid}/codes/{activationCode:uuid}/revoke', [AdminLicenseManagementController::class, 'revokeCode'])->middleware('role:super_admin|admin')->name('licenses.codes.revoke');
+        Route::post('/licenses/{license:uuid}/installations/{installation:uuid}/revoke', [AdminLicenseManagementController::class, 'revokeInstallation'])->middleware('role:super_admin|admin')->name('licenses.installations.revoke');
         Route::post('/payments/{payment:uuid}/verify', [AdminPaymentController::class, 'verify'])->name('payments.verify');
         Route::post('/payments/{payment:uuid}/reject', [AdminPaymentController::class, 'reject'])->name('payments.reject');
         Route::post('/payments/{payment:uuid}/refund', [AdminPaymentController::class, 'refund'])->name('payments.refund');
@@ -176,6 +185,7 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
         Route::post('/customers/{customer:uuid}/notes', [AdminCustomerController::class, 'storeNote'])->name('customers.notes.store');
         Route::resource('customers', AdminCustomerController::class);
         Route::resource('products', AdminProductController::class);
+        Route::post('/products/{product:slug}/release', [AdminProductReleaseController::class, 'store'])->name('products.release.build');
         Route::get('/products/{product:slug}/plans', [AdminPlanController::class, 'index'])->name('products.plans.index');
         Route::get('/products/{product:slug}/plans/create', [AdminPlanController::class, 'create'])->name('products.plans.create');
         Route::post('/products/{product:slug}/plans', [AdminPlanController::class, 'store'])->name('products.plans.store');

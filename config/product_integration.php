@@ -1,6 +1,7 @@
 <?php
 
 return [
+    'operational_sync_proof_enabled' => (bool) env('KERNELBRIDGE_OPERATIONAL_SYNC_PROOF_ENABLED', false),
     'credential_hmac' => [
         'active_key_id' => env('KERNELBRIDGE_LICENSE_HMAC_ACTIVE_KEY_ID', 'legacy-app-key'),
         'keys' => json_decode((string) env('KERNELBRIDGE_LICENSE_HMAC_KEYS', '{}'), true) ?: [],

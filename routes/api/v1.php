@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\V1\DemoModeController;
 use App\Http\Controllers\Api\V1\HealthController;
 use App\Http\Controllers\Api\V1\InstallationActivationController;
 use App\Http\Controllers\Api\V1\InstallationVerificationController;
+use App\Http\Controllers\Api\V1\OperationalSyncProofController;
 use App\Http\Controllers\Api\V1\McpController;
 use App\Http\Controllers\Api\V1\PlatformAccountLinkController;
 use App\Http\Controllers\Api\V1\PlatformEntitlementCatalogController;
@@ -20,13 +21,18 @@ Route::middleware('auth:sanctum')->get('/user', fn (Request $request): UserResou
 Route::middleware(['api.request_id', 'api.security', 'throttle:12,1'])->post('/installations/activate', [InstallationActivationController::class, 'activate'])->name('installations.activate');
 Route::middleware(['api.request_id', 'api.security', 'throttle:12,1'])->post('/installations/deactivate', [InstallationActivationController::class, 'deactivate'])->name('installations.deactivate');
 Route::middleware(['api.request_id', 'api.security', 'throttle:60,1'])->post('/installations/verify', [InstallationVerificationController::class, 'verify'])->name('installations.verify');
+Route::middleware(['api.request_id', 'api.security', 'throttle:12,1'])->post('/installations/operational-sync-proof', OperationalSyncProofController::class)->name('installations.operational-sync-proof');
 Route::middleware(['api.request_id', 'api.security', 'throttle:60,1'])->get('/licensing/products/{code}/policy', [ProductIntegrationController::class, 'licensingPolicy'])->name('licensing.policy.show');
 
 Route::middleware(['api.request_id', 'api.security', 'api.log', 'api.client', 'api.rate_limit'])->group(function (): void {
     Route::middleware('api.scope:licensing:account-link')->prefix('platform/account-links')->name('platform.account-links.')->group(function (): void {
         Route::post('/requests', [PlatformAccountLinkController::class, 'request'])->name('requests.create');
         Route::get('/{link}', [PlatformAccountLinkController::class, 'status'])->name('show');
+        Route::delete('/{link}', [PlatformAccountLinkController::class, 'unlink'])->name('unlink');
         Route::post('/{link}/activation-codes', [PlatformAccountLinkController::class, 'issueInstallationCode'])->name('activation-codes.issue');
+        Route::post('/{link}/server-enrollment-codes', [PlatformAccountLinkController::class, 'issueEnrollmentCode'])->name('enrollment-codes.issue');
+        Route::get('/{link}/installations', [PlatformAccountLinkController::class, 'installations'])->name('installations.index');
+        Route::post('/{link}/installations/{installation}/revoke', [PlatformAccountLinkController::class, 'revokeInstallation'])->name('installations.revoke');
     });
     Route::middleware('api.scope:licensing:entitlement-catalog:write')->post(
         '/platform/entitlement-catalogs',

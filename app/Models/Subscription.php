@@ -15,7 +15,7 @@ final class Subscription extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['uuid', 'customer_id', 'product_id', 'plan_id', 'invoice_id', 'subscription_number', 'status', 'starts_at', 'ends_at', 'trial_ends_at', 'grace_ends_at', 'auto_renew', 'price', 'currency', 'billing_cycle', 'metadata', 'renewal_notice_sent_at', 'created_by'];
+    protected $fillable = ['uuid', 'customer_id', 'product_id', 'product_release_id', 'plan_id', 'invoice_id', 'subscription_number', 'status', 'starts_at', 'ends_at', 'trial_ends_at', 'grace_ends_at', 'auto_renew', 'price', 'currency', 'billing_cycle', 'metadata', 'renewal_notice_sent_at', 'created_by'];
 
     protected static function booted(): void
     {
@@ -65,5 +65,10 @@ final class Subscription extends Model
     public function license(): HasOne
     {
         return $this->hasOne(SoftwareLicense::class);
+    }
+
+    public function productRelease(): BelongsTo
+    {
+        return $this->belongsTo(ProductRelease::class);
     }
 }

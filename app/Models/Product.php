@@ -14,7 +14,7 @@ final class Product extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['uuid', 'public_id', 'code', 'name', 'slug', 'tagline', 'hero_description', 'short_description', 'description', 'category', 'seo_title', 'seo_description', 'industry', 'icon', 'logo', 'cover_image', 'features', 'benefits', 'workflow', 'platform_components', 'screenshots', 'plans', 'demo_url', 'website_url', 'is_featured', 'metadata', 'sort_order', 'status', 'licensing_mode', 'runtime_type', 'licensing_policy_revision', 'licensing_mode_changed_at'];
+    protected $fillable = ['uuid', 'public_id', 'code', 'name', 'slug', 'tagline', 'hero_description', 'short_description', 'description', 'category', 'seo_title', 'seo_description', 'industry', 'icon', 'logo', 'cover_image', 'features', 'benefits', 'workflow', 'platform_components', 'screenshots', 'plans', 'demo_url', 'website_url', 'is_featured', 'metadata', 'sort_order', 'status', 'licensing_mode', 'runtime_type', 'licensing_policy_revision', 'licensing_mode_changed_at', 'repository_url', 'repository_visibility', 'github_installation_id', 'stable_release_version', 'stable_release_tag', 'installation_guide_markdown'];
 
     protected static function booted(): void
     {
@@ -67,5 +67,10 @@ final class Product extends Model
     public function associatedPlans(): BelongsToMany
     {
         return $this->belongsToMany(Plan::class, 'product_plan')->withTimestamps();
+    }
+
+    public function releases(): HasMany
+    {
+        return $this->hasMany(ProductRelease::class);
     }
 }

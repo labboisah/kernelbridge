@@ -41,7 +41,14 @@ final class ProductController extends Controller
     {
         $this->authorize('view', $product);
 
-        return Inertia::render('Admin/Products/Show', ['product' => (new ProductResource($product->load(['productFeatures', 'media', 'links'])))->resolve()]);
+        $data = (new ProductResource($product->load(['productFeatures', 'media', 'links'])))->resolve();
+        $data['repository'] = $this->deliverySettings($product);
+        $data['release'] = $product->releases()
+            ->where('version', $product->stable_release_version)
+            ->where('tag', $product->stable_release_tag)
+            ->first()?->only(['version', 'tag', 'status', 'sha256', 'archive_size', 'failure_code', 'built_at']);
+
+        return Inertia::render('Admin/Products/Show', ['product' => $data]);
     }
 
     public function edit(Product $product): Response
@@ -52,6 +59,12 @@ final class ProductController extends Controller
         $data['licensing_mode'] = $product->licensing_mode;
         $data['runtime_type'] = $product->runtime_type;
         $data['licensing_policy_revision'] = $product->licensing_policy_revision;
+        $data['repository_url'] = $product->repository_url;
+        $data['repository_visibility'] = $product->repository_visibility;
+        $data['github_installation_id'] = $product->github_installation_id;
+        $data['stable_release_version'] = $product->stable_release_version;
+        $data['stable_release_tag'] = $product->stable_release_tag;
+        $data['installation_guide_markdown'] = $product->installation_guide_markdown;
 
         return Inertia::render('Admin/Products/Edit', ['product' => $data]);
     }
@@ -69,5 +82,18 @@ final class ProductController extends Controller
         $manager->delete($product, request()->user());
 
         return redirect()->route('admin.products.index')->with('success', 'Product deleted successfully.');
+    }
+
+    /** @return array<string, mixed> */
+    private function deliverySettings(Product $product): array
+    {
+        return [
+            'repository_url' => $product->repository_url,
+            'repository_visibility' => $product->repository_visibility,
+            'github_installation_id' => $product->github_installation_id,
+            'stable_release_version' => $product->stable_release_version,
+            'stable_release_tag' => $product->stable_release_tag,
+            'installation_guide_markdown' => $product->installation_guide_markdown,
+        ];
     }
 }

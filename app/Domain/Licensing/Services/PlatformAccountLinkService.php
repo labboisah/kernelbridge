@@ -121,6 +121,61 @@ final class PlatformAccountLinkService
         return $this->publicLink($link);
     }
 
+    /** @return array<string, mixed> */
+    public function installations(ApiClient $client, string $linkUuid, int $page): array
+    {
+        $this->assertIntegrationScope($client);
+        $link = LicensePlatformAccountLink::query()
+            ->where('product_id', $client->product_id)
+            ->where('uuid', $linkUuid)
+            ->firstOrFail();
+        if ($link->status !== 'approved') {
+            throw new PlatformAccountLinkException('platform_account_not_approved', 'The platform account link is not approved.', 403);
+        }
+
+        $records = LicenseInstallation::query()
+            ->where('license_platform_account_link_id', $link->id)
+            ->where('product_id', $client->product_id)
+            ->orderByDesc('id')
+            ->paginate(25, ['installation_uuid', 'device_name', 'runtime_type', 'status', 'activated_at', 'last_verified_at', 'expires_at'], 'page', $page);
+
+        return [
+            'link_uuid' => $link->uuid,
+            'business_uuid' => $link->business_uuid,
+            'installations' => $records->getCollection()->map(fn (LicenseInstallation $installation): array => [
+                'installation_uuid' => $installation->installation_uuid,
+                'device_name' => $installation->device_name,
+                'runtime_type' => $installation->runtime_type,
+                'status' => $installation->status,
+                'activated_at' => $installation->activated_at?->toISOString(),
+                'last_verified_at' => $installation->last_verified_at?->toISOString(),
+                'expires_at' => $installation->expires_at?->toISOString(),
+            ])->all(),
+            'current_page' => $records->currentPage(),
+            'last_page' => $records->lastPage(),
+            'total' => $records->total(),
+        ];
+    }
+
+    /** @return array{uuid: string, license_uuid: string, business_uuid: string, status: string, installations_revoked: int, activation_codes_revoked: int} */
+    public function unlink(ApiClient $client, string $linkUuid): array
+    {
+        $this->assertIntegrationScope($client);
+        $link = LicensePlatformAccountLink::query()
+            ->where('product_id', $client->product_id)
+            ->where('uuid', $linkUuid)
+            ->firstOrFail();
+        $result = $this->revoke($link, null, $client->uuid);
+        $link->refresh();
+
+        return [
+            'uuid' => $link->uuid,
+            'license_uuid' => $link->license()->value('uuid'),
+            'business_uuid' => $link->business_uuid,
+            ...$result,
+        ];
+    }
+
     public function approve(LicensePlatformAccountLink $link, User $actor): LicensePlatformAccountLink
     {
         return $this->markApproved($link, $actor);
@@ -199,9 +254,9 @@ final class PlatformAccountLinkService
     }
 
     /** @return array{status: string, installations_revoked: int, activation_codes_revoked: int} */
-    public function revoke(LicensePlatformAccountLink $link, User $actor): array
+    public function revoke(LicensePlatformAccountLink $link, ?User $actor, ?string $apiClientUuid = null): array
     {
-        return DB::transaction(function () use ($link, $actor): array {
+        return DB::transaction(function () use ($link, $actor, $apiClientUuid): array {
             $license = SoftwareLicense::query()->lockForUpdate()->findOrFail($link->software_license_id);
             $product = Product::query()->whereKey($license->product_id)->lockForUpdate()->firstOrFail();
             $link = LicensePlatformAccountLink::query()->whereKey($link->id)->lockForUpdate()->firstOrFail();
@@ -209,8 +264,8 @@ final class PlatformAccountLinkService
             if ($link->status === 'revoked') {
                 return ['status' => 'revoked', 'installations_revoked' => 0, 'activation_codes_revoked' => 0];
             }
-            if ($link->status !== 'approved') {
-                throw new PlatformAccountLinkException('link_not_active', 'Only an approved platform-account link can be revoked.', 409);
+            if (! in_array($link->status, ['approved', 'pending', 'rejected'], true)) {
+                throw new PlatformAccountLinkException('link_not_active', 'This platform-account link cannot be revoked.', 409);
             }
 
             $now = now();
@@ -259,6 +314,8 @@ final class PlatformAccountLinkService
                 'installations_revoked' => $installations->count(),
                 'activation_codes_revoked' => $codes->count(),
                 'seats_released' => $seatsReleased,
+                'source' => $apiClientUuid ? 'trusted_platform_credential' : 'customer_portal',
+                'api_client_uuid' => $apiClientUuid,
             ], $link);
 
             return [
@@ -272,6 +329,7 @@ final class PlatformAccountLinkService
     public function issueInstallationCode(ApiClient $client, string $linkUuid, string $installationUuid, ?string $deviceName = null): array
     {
         $this->assertIntegrationScope($client);
+
         return DB::transaction(function () use ($client, $linkUuid, $installationUuid, $deviceName): array {
             $candidate = LicensePlatformAccountLink::query()
                 ->where('product_id', $client->product_id)
@@ -322,6 +380,126 @@ final class PlatformAccountLinkService
                 'installation_uuid' => $installationUuid,
                 'activation_code' => $issued['code'],
                 'expires_at' => $issued['activation_code']->expires_at->toISOString(),
+            ];
+        });
+    }
+
+    /**
+     * Issue an account-bound, single-use enrollment code before the server identity is known.
+     *
+     * @return array{link_uuid: string, activation_code_uuid: string, activation_code: string, expires_at: string}
+     */
+    public function issueEnrollmentCode(ApiClient $client, string $linkUuid): array
+    {
+        $this->assertIntegrationScope($client);
+
+        return DB::transaction(function () use ($client, $linkUuid): array {
+            $candidate = LicensePlatformAccountLink::query()
+                ->where('product_id', $client->product_id)
+                ->where('uuid', $linkUuid)
+                ->first();
+            if (! $candidate) {
+                throw new PlatformAccountLinkException('platform_account_not_approved', 'The platform account link is not approved.', 403);
+            }
+
+            $license = SoftwareLicense::query()->lockForUpdate()->findOrFail($candidate->software_license_id);
+            $product = Product::query()->whereKey($license->product_id)->lockForUpdate()->firstOrFail();
+            $link = LicensePlatformAccountLink::query()->whereKey($candidate->id)->lockForUpdate()->firstOrFail();
+            if ($link->status !== 'approved') {
+                throw new PlatformAccountLinkException('platform_account_not_approved', 'The platform account link is not approved.', 403);
+            }
+            if (! in_array($product->licensing_mode, ['platform_account', 'hybrid'], true)) {
+                throw new PlatformAccountLinkException('licensing_mode_not_supported', 'This product no longer accepts platform-account installation codes.', 403);
+            }
+
+            $issued = $this->activations->issueCode(
+                $license,
+                platformLink: $link,
+                apiClientUuid: $client->uuid,
+                allowUnboundPlatformEnrollment: true,
+            );
+
+            return [
+                'link_uuid' => $link->uuid,
+                'activation_code_uuid' => $issued['activation_code']->uuid,
+                'activation_code' => $issued['code'],
+                'expires_at' => $issued['activation_code']->expires_at->toISOString(),
+            ];
+        });
+    }
+
+    /**
+     * @return array{link_uuid: string, installation_uuid: string, status: string, installations_revoked: int, activation_codes_revoked: int}
+     */
+    public function revokeInstallation(ApiClient $client, string $linkUuid, string $installationUuid): array
+    {
+        $this->assertIntegrationScope($client);
+
+        return DB::transaction(function () use ($client, $linkUuid, $installationUuid): array {
+            $link = LicensePlatformAccountLink::query()
+                ->where('product_id', $client->product_id)
+                ->where('uuid', $linkUuid)
+                ->lockForUpdate()
+                ->first();
+            if (! $link) {
+                throw new PlatformAccountLinkException('platform_account_not_found', 'The platform account link was not found.', 404);
+            }
+
+            $license = SoftwareLicense::query()->lockForUpdate()->findOrFail($link->software_license_id);
+            $installation = LicenseInstallation::query()
+                ->where('license_platform_account_link_id', $link->id)
+                ->where('installation_uuid', $installationUuid)
+                ->lockForUpdate()
+                ->first();
+            $codes = LicenseActivationCode::query()
+                ->where('license_platform_account_link_id', $link->id)
+                ->where('bound_installation_uuid', $installationUuid)
+                ->lockForUpdate()
+                ->get();
+            if (! $installation && $codes->isEmpty()) {
+                throw new PlatformAccountLinkException('installation_not_found', 'The installation was not found under this account link.', 404);
+            }
+
+            $issuedCodes = $codes->where('status', 'issued');
+            foreach ($issuedCodes as $code) {
+                $code->forceFill(['status' => 'revoked', 'revoked_at' => now()])->save();
+                $this->audit->record('license.activation_code.revoked', null, [
+                    'activation_code_uuid' => $code->uuid,
+                    'installation_uuid' => $installationUuid,
+                    'license_uuid' => $license->uuid,
+                    'product_uuid' => $license->product()->value('uuid'),
+                    'source' => 'platform_account_installation_revocation',
+                    'platform_account_link_uuid' => $link->uuid,
+                    'api_client_uuid' => $client->uuid,
+                ], $code);
+            }
+
+            $revoked = 0;
+            if ($installation && $installation->status !== 'revoked') {
+                $installation->forceFill([
+                    'status' => 'revoked',
+                    'deactivated_at' => now(),
+                    'revoked_at' => now(),
+                    'credential_encrypted' => null,
+                ])->save();
+                $revoked = 1;
+                $this->audit->record('license.installation.revoked', null, [
+                    'installation_uuid' => $installation->installation_uuid,
+                    'license_uuid' => $license->uuid,
+                    'product_uuid' => $license->product()->value('uuid'),
+                    'source' => 'platform_account_installation_revocation',
+                    'platform_account_link_uuid' => $link->uuid,
+                    'seats_released' => $installation->expires_at === null || $installation->expires_at->isFuture(),
+                    'api_client_uuid' => $client->uuid,
+                ], $installation);
+            }
+
+            return [
+                'link_uuid' => $link->uuid,
+                'installation_uuid' => $installationUuid,
+                'status' => $installation?->fresh()->status ?? 'revoked',
+                'installations_revoked' => $revoked,
+                'activation_codes_revoked' => $issuedCodes->count(),
             ];
         });
     }

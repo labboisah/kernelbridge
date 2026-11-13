@@ -25,7 +25,7 @@ final readonly class SubscriptionService
             if ($price === null) {
                 throw ValidationException::withMessages(['price' => 'A contracted price is required for custom plans.']);
             }
-            $subscription = Subscription::query()->create(['customer_id' => $customer->id, 'product_id' => $plan->product_id, 'plan_id' => $plan->id, 'invoice_id' => $invoice?->id, 'status' => SubscriptionStatus::Pending, 'auto_renew' => $options['auto_renew'] ?? true, 'price' => $price, 'currency' => $options['currency'] ?? $plan->currency, 'billing_cycle' => $plan->billing_cycle, 'metadata' => $options['metadata'] ?? null, 'created_by' => $actor->id]);
+            $subscription = Subscription::query()->create(['customer_id' => $customer->id, 'product_id' => $plan->product_id, 'product_release_id' => $options['product_release_id'] ?? null, 'plan_id' => $plan->id, 'invoice_id' => $invoice?->id, 'status' => SubscriptionStatus::Pending, 'auto_renew' => $options['auto_renew'] ?? true, 'price' => $price, 'currency' => $options['currency'] ?? $plan->currency, 'billing_cycle' => $plan->billing_cycle, 'metadata' => $options['metadata'] ?? null, 'created_by' => $actor->id]);
             $customer->products()->syncWithoutDetaching([$plan->product_id]);
             $subscription->forceFill(['subscription_number' => sprintf('KBT-SUB-%s-%06d', now()->year, $subscription->id)])->save();
             $this->change($subscription, 'created', null, $plan, $actor, [], 'New subscription');

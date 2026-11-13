@@ -39,6 +39,7 @@ final class MarketLensPlanSeeder extends Seeder
         'mode_services' => 'Services operating mode',
         'module_shareholders' => 'Shareholder management',
         'max_server_installations' => 'Business Server installations',
+        'max_client_app_devices' => 'Business App devices',
     ];
 
     /** @var array<string, string> */
@@ -48,6 +49,7 @@ final class MarketLensPlanSeeder extends Seeder
         'mode_services' => 'Allows licensed branches to configure and use service operations.',
         'module_shareholders' => 'Enables shareholder and ownership management alongside any licensed operating mode.',
         'max_server_installations' => 'Maximum active Business Server installations covered by this plan. Administrators can edit this limit.',
+        'max_client_app_devices' => 'Maximum active and pending Business App devices covered by this plan. Administrators can edit this limit.',
     ];
 
     public function run(): void
@@ -114,6 +116,17 @@ final class MarketLensPlanSeeder extends Seeder
                 'enabled' => true,
                 'limit_value' => '1',
                 'sort_order' => array_search('max_server_installations', array_keys(self::FEATURE_NAMES), true),
+            ],
+        );
+
+        $plan->features()->firstOrCreate(
+            ['feature_key' => 'max_client_app_devices'],
+            [
+                'feature_name' => self::FEATURE_NAMES['max_client_app_devices'],
+                'description' => self::FEATURE_DESCRIPTIONS['max_client_app_devices'],
+                'enabled' => true,
+                'limit_value' => '1',
+                'sort_order' => array_search('max_client_app_devices', array_keys(self::FEATURE_NAMES), true),
             ],
         );
     }

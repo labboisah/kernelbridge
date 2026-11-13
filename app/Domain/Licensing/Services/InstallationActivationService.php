@@ -40,8 +40,9 @@ final class InstallationActivationService
         ?LicensePlatformAccountLink $platformLink = null,
         ?string $apiClientUuid = null,
         ?string $deviceName = null,
+        bool $allowUnboundPlatformEnrollment = false,
     ): array {
-        return DB::transaction(function () use ($license, $issuedBy, $replaceCodeUuid, $boundInstallationUuid, $platformLink, $apiClientUuid, $deviceName): array {
+        return DB::transaction(function () use ($license, $issuedBy, $replaceCodeUuid, $boundInstallationUuid, $platformLink, $apiClientUuid, $deviceName, $allowUnboundPlatformEnrollment): array {
             $license = SoftwareLicense::query()
                 ->with(['subscription.entitlements', 'subscription.plan.features', 'subscription.plan.limits', 'product'])
                 ->lockForUpdate()
@@ -57,7 +58,7 @@ final class InstallationActivationService
                 && $platformLink->product_id === $license->product_id
                 && $platformLink->status === 'approved'
                 && in_array($product->licensing_mode, ['platform_account', 'hybrid'], true)
-                && $boundInstallationUuid !== null;
+                && ($boundInstallationUuid !== null || $allowUnboundPlatformEnrollment);
             if (! in_array($license->product->licensing_mode, ['direct', 'hybrid'], true) && ! $platformIssued) {
                 throw ValidationException::withMessages([
                     'license' => 'Activation codes can only be issued through the configured licensing flow.',
@@ -299,6 +300,41 @@ final class InstallationActivationService
     public function revokeForCustomer(LicenseInstallation $installation, Authenticatable $actor): array
     {
         return $this->markInactive($installation->uuid, null, $actor, 'customer_portal', 'revoked');
+    }
+
+    /**
+     * @return array{installation_uuid: string, status: string, deactivated_at: ?string, revoked_at: ?string}
+     */
+    public function revokeForAdmin(LicenseInstallation $installation, User $actor): array
+    {
+        return $this->markInactive($installation->uuid, null, $actor, 'admin_console', 'revoked');
+    }
+
+    public function revokeCodeForAdmin(LicenseActivationCode $code, User $actor): LicenseActivationCode
+    {
+        return DB::transaction(function () use ($code, $actor): LicenseActivationCode {
+            SoftwareLicense::query()->whereKey($code->software_license_id)->lockForUpdate()->firstOrFail();
+            $code = LicenseActivationCode::query()->whereKey($code->id)->lockForUpdate()->firstOrFail();
+
+            if ($code->status !== 'issued' || ! $code->expires_at?->isFuture()) {
+                throw ValidationException::withMessages([
+                    'activation_code' => 'Only an unexpired, unused code can be revoked.',
+                ]);
+            }
+
+            $code->forceFill(['status' => 'revoked', 'revoked_at' => now()])->save();
+            $this->audit->record('license.activation_code.revoked', $actor, [
+                'activation_code_uuid' => $code->uuid,
+                'license_uuid' => $code->license()->value('uuid'),
+                'product_uuid' => $code->product()->value('uuid'),
+                'platform_account_link_uuid' => $code->platformAccountLink()->value('uuid'),
+                'bound_installation_uuid' => $code->bound_installation_uuid,
+                'source' => 'admin_console',
+                'seat_released' => true,
+            ], $code);
+
+            return $code->refresh();
+        });
     }
 
     /**

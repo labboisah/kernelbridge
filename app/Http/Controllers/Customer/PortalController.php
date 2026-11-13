@@ -6,13 +6,13 @@ use App\Domain\Finance\Services\CustomerCreditService;
 use App\Domain\Finance\Services\FlutterwavePaymentService;
 use App\Domain\Finance\Services\InvoiceManager;
 use App\Domain\Finance\Services\PaymentManager;
-use App\Domain\Licensing\Services\InstallationActivationService;
-use App\Domain\Licensing\Services\PlatformAccountLinkService;
 use App\Domain\Licensing\Exceptions\PlatformAccountLinkException;
+use App\Domain\Licensing\Services\InstallationActivationService;
 use App\Domain\Licensing\Services\LicenseService;
 use App\Domain\Licensing\Services\PackageCatalog;
 use App\Domain\Licensing\Services\PackageChangeService;
 use App\Domain\Licensing\Services\PackagePurchaseService;
+use App\Domain\Licensing\Services\PlatformAccountLinkService;
 use App\Domain\Security\Contracts\FileScanner;
 use App\Domain\Subscriptions\Services\SubscriptionService;
 use App\Http\Controllers\Controller;
@@ -20,6 +20,7 @@ use App\Http\Requests\Customer\StorePaymentRequest;
 use App\Http\Requests\Customer\StoreServiceRequest;
 use App\Http\Requests\Customer\TransitionServiceRequest;
 use App\Http\Requests\Customer\UpdateServiceRequest;
+use App\Models\BillingSetting;
 use App\Models\ClientSetupBundle;
 use App\Models\Customer;
 use App\Models\CustomerCreditEntry;
@@ -31,12 +32,13 @@ use App\Models\Payment;
 use App\Models\Plan;
 use App\Models\SoftwareLicense;
 use App\Models\Subscription;
-use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\RequestException;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -289,13 +291,15 @@ final class PortalController extends Controller
             ->map(function (Plan $plan): array {
                 $planFeatures = $plan->features->keyBy('feature_key');
                 $modules = collect(config('edunexa.modules', []))->filter(function (array $module) use ($planFeatures): bool {
-                    $key = 'module_'.\Illuminate\Support\Str::snake($module['key']);
+                    $key = 'module_'.Str::snake($module['key']);
+
                     return (bool) $planFeatures->get($key)?->enabled;
                 })->map(function (array $module) use ($planFeatures): array {
                     return [
                         'code' => $module['key'], 'name' => $module['name'], 'description' => $module['description'],
                         'features' => collect($module['features'])->map(function (array $feature) use ($module, $planFeatures): array {
-                            $key = \Illuminate\Support\Str::snake($module['key'].'_'.$feature['name']);
+                            $key = Str::snake($module['key'].'_'.$feature['name']);
+
                             return ['key' => $key, 'name' => $feature['name'], 'description' => $feature['description'],
                                 'enabled' => (bool) $planFeatures->get($key)?->enabled, 'ready' => $feature['status'] === 'ready'];
                         })->values(),
@@ -347,7 +351,7 @@ final class PortalController extends Controller
         $creditHistory = CustomerCreditEntry::query()->whereIn('customer_id', $this->customerIds($request))->latest()->limit(30)->get()
             ->map(fn ($entry) => $entry->only(['uuid', 'description', 'amount', 'currency', 'created_at']));
 
-        return Inertia::render('Customer/Licenses/Index', ['credits' => $credits, 'creditHistory' => $creditHistory, 'packages' => $packages, 'orders' => $orders, 'edunexaPlans' => $edunexaPlans, 'edunexaOrder' => $edunexaOrder, 'vatRate' => \App\Models\BillingSetting::vatRate(), 'licenses' => $licenses->map(fn (SoftwareLicense $license) => [
+        return Inertia::render('Customer/Licenses/Index', ['credits' => $credits, 'creditHistory' => $creditHistory, 'packages' => $packages, 'orders' => $orders, 'edunexaPlans' => $edunexaPlans, 'edunexaOrder' => $edunexaOrder, 'vatRate' => BillingSetting::vatRate(), 'licenses' => $licenses->map(fn (SoftwareLicense $license) => [
             'uuid' => $license->uuid, 'identifier' => 'KBT-LIC-'.strtoupper(substr(str_replace('-', '', $license->uuid), 0, 12)),
             'licensing_mode' => $license->subscription?->product?->licensing_mode ?? 'legacy',
             'license_key' => $license->subscription?->product?->licensing_mode === 'legacy' ? $service->key($license) : null,
@@ -437,11 +441,24 @@ final class PortalController extends Controller
     {
         abort_unless($request->user()->customers()->whereKey($invoice->customer_id)->exists(), 403);
         $invoice->load(['customer', 'items', 'payments']);
-        $paidSubscription = Subscription::query()->where('invoice_id', $invoice->id)->whereHas('license')->with('product')->first();
+        $paidSubscription = Subscription::query()->where('invoice_id', $invoice->id)->whereHas('license')->with(['product', 'productRelease'])->first();
         $clientSetup = $paidSubscription
             && ClientSetupBundle::where('subscription_id', $paidSubscription->id)->exists()
             && $invoice->status->value === 'paid'
-                ? (in_array($paidSubscription->product?->licensing_mode, ['direct', 'hybrid'], true)
+                ? array_merge([
+                    'archive' => $paidSubscription->productRelease?->status === 'ready'
+                        ? [
+                            'url' => route('portal.services.release.download', $paidSubscription->uuid),
+                            'product_name' => $paidSubscription->product?->name,
+                            'version' => $paidSubscription->productRelease->version,
+                            'sha256' => $paidSubscription->productRelease->sha256,
+                        ]
+                        : null,
+                    'guide_url' => filled($paidSubscription->product?->installation_guide_markdown)
+                        ? route('portal.services.installation-guide', $paidSubscription->uuid)
+                        : null,
+                    'environment_url' => route('portal.services.environment', $paidSubscription->uuid),
+                ], in_array($paidSubscription->product?->licensing_mode, ['direct', 'hybrid'], true)
                     ? ['activation_ready' => true]
                     : ['license_key' => app(LicenseService::class)->key($paidSubscription->license)])
                 : null;
@@ -454,6 +471,29 @@ final class PortalController extends Controller
                 && in_array($invoice->status->value, ['issued', 'partially_paid', 'overdue'], true)
                 && (float) $invoice->balance > 0,
             'portal' => true,
+        ]);
+    }
+
+    public function installationGuide(Request $request, Subscription $subscription): Response
+    {
+        abort_unless($request->user()->customers()->whereKey($subscription->customer_id)->exists(), 403);
+        $subscription->loadMissing(['invoice', 'product', 'productRelease']);
+        abort_unless(
+            $subscription->invoice?->status->value === 'paid'
+                && filled($subscription->product?->installation_guide_markdown),
+            404,
+        );
+
+        return Inertia::render('Customer/Products/InstallationGuide', [
+            'product' => [
+                'name' => $subscription->product->name,
+                'version' => $subscription->productRelease?->version,
+            ],
+            'guideHtml' => Str::markdown($subscription->product->installation_guide_markdown, [
+                'html_input' => 'strip',
+                'allow_unsafe_links' => false,
+            ]),
+            'invoiceUrl' => route('portal.invoices.show', $subscription->invoice),
         ]);
     }
 

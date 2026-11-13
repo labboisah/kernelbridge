@@ -43,4 +43,9 @@ return [
         'base_url' => env('FLUTTERWAVE_BASE_URL', 'https://api.flutterwave.com/v3'),
     ],
 
+    'github_app' => [
+        'application_id' => env('GITHUB_APP_ID'),
+        'private_key_path' => env('GITHUB_APP_PRIVATE_KEY_PATH'),
+    ],
+
 ];

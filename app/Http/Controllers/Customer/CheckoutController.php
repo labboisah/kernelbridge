@@ -12,9 +12,11 @@ use App\Http\Controllers\Controller;
 use App\Models\Customer;
 use App\Models\HostingSetting;
 use App\Models\Plan;
+use App\Models\ProductRelease;
 use App\Models\Subscription;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 
@@ -50,12 +52,16 @@ final class CheckoutController extends Controller
         $data = $request->validate(['implementation.mode' => ['required', 'in:local,online'], 'implementation.domain' => ['nullable', 'string', 'max:253', 'regex:/^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}$/']]);
         $customer = $request->user()->customers()->orderByDesc('customer_user.is_primary')->firstOrFail();
         $plan = $plans->first();
+        $release = ProductRelease::stableFor($plan->product);
+        if ($plan->product->repository_url && ! $release) {
+            throw ValidationException::withMessages(['packages' => 'The selected product release is not built and ready for download. Contact sales before placing this order.']);
+        }
         if ($plans->contains(fn ($p) => $p->price === null || (float) $p->price <= 0)) {
             throw ValidationException::withMessages(['packages' => 'Contact sales to price this plan before checkout.']);
         }
-        $invoice = DB::transaction(function () use ($plans, $customer, $plan, $data, $request) {
+        $invoice = DB::transaction(function () use ($plans, $customer, $plan, $data, $request, $release) {
             if ($plan->product->code === 'MEDIFLOW') {
-                return app(PackagePurchaseService::class)->purchase($customer, $plans->pluck('uuid')->all(), $request->user(), $data['implementation']);
+                return app(PackagePurchaseService::class)->purchase($customer, $plans->pluck('uuid')->all(), $request->user(), $data['implementation'], $release?->id);
             }
             Customer::lockForUpdate()->findOrFail($customer->id);
             if (Subscription::where('customer_id', $customer->id)->where('product_id', $plan->product_id)->whereIn('status', ['pending', 'active', 'trial', 'grace', 'suspended'])->exists()) {
@@ -69,7 +75,7 @@ final class CheckoutController extends Controller
             $items = array_merge($items, app(ImplementationPricing::class)->lines($implementation, $plan->product_id));
             $invoices = app(InvoiceManager::class);
             $invoice = $invoices->create(['customer_id' => $customer->id, 'currency' => $plan->currency, 'issue_date' => today(), 'due_date' => today()->addDays(7), 'items' => $items, 'terms' => 'Activation is issued only after full verified payment. Hosting is prepaid for the selected term. Domain requests are subject to availability; infrastructure provisioning is coordinated by support.'], $request->user());
-            app(SubscriptionService::class)->create($customer, $plan, $invoice, $request->user(), ['auto_renew' => false, 'metadata' => ['checkout' => true, 'implementation' => $implementation]]);
+            app(SubscriptionService::class)->create($customer, $plan, $invoice, $request->user(), ['auto_renew' => false, 'product_release_id' => $release?->id, 'metadata' => ['checkout' => true, 'implementation' => $implementation]]);
             $invoices->issue($invoice, $request->user());
 
             return $invoice;
@@ -83,5 +89,21 @@ final class CheckoutController extends Controller
         abort_unless($request->user()->customers()->whereKey($subscription->customer_id)->exists(), 403);
 
         return response($setup->environment($subscription), 200, ['Content-Type' => 'text/plain; charset=UTF-8', 'Content-Disposition' => 'attachment; filename="client-licensing.env"', 'Cache-Control' => 'private, no-store, max-age=0', 'Pragma' => 'no-cache', 'X-Content-Type-Options' => 'nosniff']);
+    }
+
+    public function downloadRelease(Request $request, Subscription $subscription)
+    {
+        abort_unless($request->user()->customers()->whereKey($subscription->customer_id)->exists(), 403);
+        $release = $subscription->productRelease;
+        abort_unless($subscription->invoice?->status->value === 'paid' && $release?->status === 'ready' && $release->product_id === $subscription->product_id && filled($release->storage_path), 404);
+        abort_unless(Storage::disk('local')->exists($release->storage_path), 404);
+
+        return Storage::disk('local')->download($release->storage_path, $release->downloadName(), [
+            'Cache-Control' => 'private, no-store, max-age=0',
+            'Pragma' => 'no-cache',
+            'X-Content-Type-Options' => 'nosniff',
+            'X-Product-Version' => $release->version,
+            'X-Archive-SHA256' => $release->sha256,
+        ]);
     }
 }

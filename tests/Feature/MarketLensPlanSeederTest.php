@@ -42,6 +42,7 @@ final class MarketLensPlanSeederTest extends TestCase
             'mode_services' => false,
             'module_shareholders' => true,
             'max_server_installations' => true,
+            'max_client_app_devices' => true,
         ], $this->featureMatrix($plans->get('marketlens-sales')));
         $this->assertSame([
             'mode_sales' => false,
@@ -49,6 +50,7 @@ final class MarketLensPlanSeederTest extends TestCase
             'mode_services' => false,
             'module_shareholders' => true,
             'max_server_installations' => true,
+            'max_client_app_devices' => true,
         ], $this->featureMatrix($plans->get('marketlens-production')));
         $this->assertSame([
             'mode_sales' => false,
@@ -56,6 +58,7 @@ final class MarketLensPlanSeederTest extends TestCase
             'mode_services' => true,
             'module_shareholders' => true,
             'max_server_installations' => true,
+            'max_client_app_devices' => true,
         ], $this->featureMatrix($plans->get('marketlens-services')));
         $this->assertSame([
             'mode_sales' => true,
@@ -63,6 +66,7 @@ final class MarketLensPlanSeederTest extends TestCase
             'mode_services' => true,
             'module_shareholders' => true,
             'max_server_installations' => true,
+            'max_client_app_devices' => true,
         ], $this->featureMatrix($plans->get('marketlens-complete')));
 
         foreach ($plans as $plan) {
@@ -75,6 +79,7 @@ final class MarketLensPlanSeederTest extends TestCase
             $this->assertSame('NGN', $plan->currency);
             $this->assertSame([], $plan->limits()->get()->all());
             $this->assertSame('1', $plan->features()->where('feature_key', 'max_server_installations')->value('limit_value'));
+            $this->assertSame('1', $plan->features()->where('feature_key', 'max_client_app_devices')->value('limit_value'));
         }
     }
 
@@ -115,6 +120,7 @@ final class MarketLensPlanSeederTest extends TestCase
         $plan->update(['price' => 12500, 'is_active' => false, 'is_public' => false]);
         $plan->features()->where('feature_key', 'mode_sales')->update(['enabled' => false]);
         $plan->features()->where('feature_key', 'max_server_installations')->update(['limit_value' => '5']);
+        $plan->features()->where('feature_key', 'max_client_app_devices')->update(['limit_value' => '8']);
 
         $this->seed(MarketLensPlanSeeder::class);
 
@@ -123,6 +129,7 @@ final class MarketLensPlanSeederTest extends TestCase
         $this->assertFalse($plan->fresh()->is_public);
         $this->assertFalse((bool) $plan->fresh()->features()->where('feature_key', 'mode_sales')->value('enabled'));
         $this->assertSame('5', $plan->fresh()->features()->where('feature_key', 'max_server_installations')->value('limit_value'));
+        $this->assertSame('8', $plan->fresh()->features()->where('feature_key', 'max_client_app_devices')->value('limit_value'));
     }
 
     public function test_it_promotes_only_untouched_hidden_drafts_from_the_previous_seeder(): void

@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Domain\Finance\Services\InvoiceManager;
+use App\Domain\Licensing\Services\EdunexaModulePurchaseService;
 use App\Domain\Licensing\Services\LicenseService;
 use App\Domain\Licensing\Services\PackageCatalog;
 use App\Domain\Licensing\Services\PackageChangeService;
@@ -14,9 +15,9 @@ use App\Models\Invoice;
 use App\Models\Payment;
 use App\Models\Plan;
 use App\Models\Product;
+use App\Models\ProductRelease;
 use App\Models\Subscription;
 use App\Models\User;
-use App\Domain\Licensing\Services\EdunexaModulePurchaseService;
 use Database\Seeders\EdunexaModuleSeeder;
 use Database\Seeders\MediFlowPackageSeeder;
 use Database\Seeders\PlanSeeder;
@@ -26,6 +27,8 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
 
@@ -167,6 +170,81 @@ class CheckoutTest extends TestCase
         $this->actingAs(User::factory()->create())->get(route('portal.services.environment', $subscription))->assertForbidden();
     }
 
+    public function test_paid_invoice_unlocks_only_its_pinned_product_archive_and_customer_portal_guide(): void
+    {
+        Storage::fake('local');
+        $product = $this->plan->product;
+        $product->forceFill([
+            'licensing_mode' => 'direct',
+            'repository_url' => 'https://github.com/acme/mediflow',
+            'repository_visibility' => 'public',
+            'stable_release_version' => '4.2.0',
+            'stable_release_tag' => 'v4.2.0',
+            'installation_guide_markdown' => "# MediFlow installation\n\n<script>alert('x')</script>\n\n[unsafe](javascript:alert(1))",
+        ])->save();
+        $path = 'product-releases/'.$product->uuid.'/4.2.0/42.zip';
+        Storage::disk('local')->put($path, "PK\x03\x04mediflow");
+        $release = ProductRelease::query()->create([
+            'product_id' => $product->id,
+            'version' => '4.2.0',
+            'tag' => 'v4.2.0',
+            'status' => 'ready',
+            'storage_path' => $path,
+            'sha256' => hash('sha256', "PK\x03\x04mediflow"),
+            'archive_size' => strlen("PK\x03\x04mediflow"),
+            'built_at' => now(),
+        ]);
+
+        $invoice = $this->order('local');
+        $subscription = Subscription::sole();
+        $this->assertSame($release->id, $subscription->product_release_id);
+        $this->get(route('portal.services.release.download', $subscription))->assertNotFound();
+        $this->get(route('portal.services.installation-guide', $subscription))->assertNotFound();
+
+        $this->pay($invoice);
+        $this->get(route('portal.invoices.show', $invoice))->assertInertia(fn (Assert $page) => $page
+            ->where('clientSetup.archive.version', '4.2.0')
+            ->where('clientSetup.archive.product_name', 'MediFlow')
+            ->where('clientSetup.guide_url', route('portal.services.installation-guide', $subscription))
+            ->where('clientSetup.environment_url', route('portal.services.environment', $subscription)));
+
+        $this->get(route('portal.services.installation-guide', $subscription))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Customer/Products/InstallationGuide')
+                ->where('product.version', '4.2.0')
+                ->where('guideHtml', fn (string $html) => str_contains($html, 'MediFlow installation')
+                    && ! str_contains($html, '<script')
+                    && ! str_contains($html, 'javascript:')));
+
+        $this->get(route('portal.services.release.download', $subscription))
+            ->assertOk()
+            ->assertHeader('X-Archive-SHA256', $release->sha256)
+            ->assertHeader('X-Product-Version', '4.2.0')
+            ->assertHeader('Content-Disposition', 'attachment; filename=mediflow-4-2-0.zip');
+
+        $other = User::factory()->create();
+        $this->actingAs($other)->get(route('portal.services.release.download', $subscription))->assertForbidden();
+        $this->actingAs($other)->get(route('portal.services.installation-guide', $subscription))->assertForbidden();
+    }
+
+    public function test_checkout_requires_configured_release_archive_to_be_ready(): void
+    {
+        $this->plan->product->forceFill([
+            'repository_url' => 'https://github.com/acme/mediflow',
+            'repository_visibility' => 'public',
+            'stable_release_version' => '4.2.0',
+            'stable_release_tag' => 'v4.2.0',
+        ])->save();
+
+        $this->post(route('portal.checkout.store'), [
+            'packages' => [$this->plan->uuid],
+            'implementation' => ['mode' => 'local'],
+        ])->assertSessionHasErrors('packages');
+
+        $this->assertDatabaseCount('invoices', 0);
+    }
+
     public function test_edunexa_setup_redirects_to_configuration_after_activation(): void
     {
         $product = Product::query()->where('code', 'EDUNEXA')->firstOrFail();
@@ -220,7 +298,7 @@ class CheckoutTest extends TestCase
         $returnedEntitlements = collect($response->json('data.entitlements.entitlements'))->pluck('key')->sort()->values()->all();
         $configuration = collect($response->json('data.configuration.packages'));
         $availableModuleFeatures = $configuration->flatMap(fn (array $module): array => [
-            'module_'.\Illuminate\Support\Str::snake($module['key']),
+            'module_'.Str::snake($module['key']),
             ...array_column($module['features'], 'key'),
         ])->sort()->values()->all();
         $configuredEntitlements = collect($response->json('data.configuration.entitlements'))->pluck('key')->sort()->values()->all();

@@ -7,6 +7,7 @@ use App\Domain\Subscriptions\Services\SubscriptionService;
 use App\Models\Customer;
 use App\Models\Invoice;
 use App\Models\Plan;
+use App\Models\ProductRelease;
 use App\Models\Subscription;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
@@ -16,9 +17,9 @@ final readonly class PackagePurchaseService
 {
     public function __construct(private InvoiceManager $invoices, private SubscriptionService $subscriptions) {}
 
-    public function purchase(Customer $customer, array $uuids, User $actor, array $implementation = []): Invoice
+    public function purchase(Customer $customer, array $uuids, User $actor, array $implementation = [], ?int $productReleaseId = null): Invoice
     {
-        $invoice = DB::transaction(function () use ($customer, $uuids, $actor, $implementation): Invoice {
+        $invoice = DB::transaction(function () use ($customer, $uuids, $actor, $implementation, $productReleaseId): Invoice {
             Customer::query()->lockForUpdate()->findOrFail($customer->id);
             $plans = Plan::query()->publiclyAvailable()->whereIn('uuid', $uuids)
                 ->whereIn('slug', array_keys(config('mediflow.packages')))
@@ -28,6 +29,10 @@ final readonly class PackagePurchaseService
                 throw ValidationException::withMessages(['packages' => 'Select available MediFlow packages.']);
             }
             $primary = $plans->firstWhere('uuid', $uuids[0]);
+            $release = ProductRelease::stableFor($primary->product);
+            if ($primary->product->repository_url && (! $release || $release->id !== $productReleaseId)) {
+                throw ValidationException::withMessages(['packages' => 'The selected MediFlow release is not built and ready for download. Contact sales before placing this order.']);
+            }
             if ($plans->contains(fn (Plan $p) => $p->price === null || (float) $p->price <= 0)
                 || $plans->pluck('currency')->unique()->count() !== 1
                 || $plans->map(fn (Plan $p) => $p->billing_cycle->value)->unique()->count() !== 1
@@ -71,7 +76,7 @@ final readonly class PackagePurchaseService
                 'terms' => 'An activation code is issued after full payment is verified. This licence is bound to the first activated computer.',
             ], $actor);
             $this->subscriptions->create($customer, $primary, $invoice, $actor, [
-                'price' => number_format($recurringMinor / 100, 2, '.', ''), 'auto_renew' => false,
+                'price' => number_format($recurringMinor / 100, 2, '.', ''), 'auto_renew' => false, 'product_release_id' => $release?->id,
                 'metadata' => [
                     'implementation' => $implementation, 'checkout' => true, 'device_bound' => true, 'primary_package' => $primary->slug,
                     'selected_packages' => $plans->pluck('slug')->values()->all(),

@@ -6,7 +6,7 @@ Production foundation for KernelBridge Technologies LTD, built with Laravel 12, 
 
 ## Requirements and installation
 
-Requires PHP 8.3+ with MySQL, Redis, OpenSSL, Mbstring, PDO and XML extensions; Composer 2; Node.js 20+; MySQL 8+; and Redis 6+.
+Requires PHP 8.3+ with MySQL, Redis, OpenSSL, Mbstring, PDO, XML and Zip extensions; Composer 2; Node.js 20+; MySQL 8+; and Redis 6+.
 
 ```bash
 git clone <repository-url> kernelbridge

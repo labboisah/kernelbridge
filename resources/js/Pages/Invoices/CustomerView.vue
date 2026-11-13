@@ -19,12 +19,22 @@ const pay = () => router.post(route('portal.invoices.pay-online', props.invoice.
         <section v-if="clientSetup?.activation_ready" class="mx-auto mb-6 max-w-4xl rounded-2xl bg-emerald-50 p-6 print:hidden">
             <h2 class="text-xl font-bold">Payment confirmed: generate your installation code</h2>
             <p class="mt-3">Generate a one-time installation code from your activation codes page. It will be shown once and expires after 24 hours.</p>
-            <Link :href="route('portal.licenses.index')" class="mt-4 inline-block rounded-xl bg-cyan-700 px-5 py-3 font-bold text-white">Generate installation code</Link>
+            <div class="mt-4 flex flex-wrap gap-3">
+                <a v-if="clientSetup.archive" :href="clientSetup.archive.url" class="inline-flex items-center gap-2 rounded-xl bg-cyan-700 px-5 py-3 font-bold text-white">Download {{ clientSetup.archive.product_name || 'product' }} {{ clientSetup.archive.version }}</a>
+                <Link v-if="clientSetup.guide_url" :href="clientSetup.guide_url" class="inline-flex items-center rounded-xl border border-emerald-700 px-5 py-3 font-bold text-emerald-800">Open installation guide</Link>
+                <a v-if="clientSetup.environment_url" :href="clientSetup.environment_url" class="inline-flex items-center rounded-xl border border-emerald-700 px-5 py-3 font-bold text-emerald-800">Download licensing configuration</a>
+                <Link :href="route('portal.licenses.index')" class="inline-flex items-center rounded-xl border border-emerald-700 px-5 py-3 font-bold text-emerald-800">Generate installation code</Link>
+            </div>
+            <p v-if="clientSetup.archive?.sha256" class="mt-3 break-all text-xs text-emerald-900">Archive SHA-256: {{ clientSetup.archive.sha256 }}</p>
         </section>
         <section v-else-if="clientSetup?.license_key" class="mx-auto mb-6 max-w-4xl rounded-2xl bg-emerald-50 p-6 print:hidden">
             <h2 class="text-xl font-bold">Payment confirmed: activate your service</h2>
             <p class="mt-3">Legacy license key: <code class="break-all font-bold">{{ clientSetup.license_key }}</code></p>
             <p class="mt-3 text-sm">Enter this legacy key in the licensing screen for applications configured for legacy key activation.</p>
+            <div class="mt-4 flex flex-wrap gap-3">
+                <a v-if="clientSetup.archive" :href="clientSetup.archive.url" class="rounded-xl bg-cyan-700 px-5 py-3 font-bold text-white">Download {{ clientSetup.archive.product_name || 'product' }} {{ clientSetup.archive.version }}</a>
+                <Link v-if="clientSetup.guide_url" :href="clientSetup.guide_url" class="rounded-xl border border-emerald-700 px-5 py-3 font-bold text-emerald-800">Open installation guide</Link>
+            </div>
         </section>
         <article class="mx-auto max-w-4xl rounded-2xl bg-white p-6 shadow-sm sm:p-12 print:shadow-none">
             <div class="flex justify-between gap-6">

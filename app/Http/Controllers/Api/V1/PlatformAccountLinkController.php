@@ -51,6 +51,29 @@ final class PlatformAccountLinkController extends Controller
         return ApiResponse::success($request, $result);
     }
 
+    public function unlink(Request $request, string $link, PlatformAccountLinkService $links): JsonResponse
+    {
+        try {
+            $result = $links->unlink($request->attributes->get('api_client'), $link);
+        } catch (PlatformAccountLinkException $exception) {
+            return ApiResponse::error($request, $exception->errorCode, $exception->getMessage(), $exception->status);
+        }
+
+        return ApiResponse::success($request, $result);
+    }
+
+    public function installations(Request $request, string $link, PlatformAccountLinkService $links): JsonResponse
+    {
+        $data = $request->validate(['page' => ['sometimes', 'integer', 'min:1', 'max:1000000']]);
+        try {
+            $result = $links->installations($request->attributes->get('api_client'), $link, (int) ($data['page'] ?? 1));
+        } catch (PlatformAccountLinkException $exception) {
+            return ApiResponse::error($request, $exception->errorCode, $exception->getMessage(), $exception->status);
+        }
+
+        return ApiResponse::success($request, $result)->header('Cache-Control', 'no-store, private');
+    }
+
     public function issueInstallationCode(Request $request, string $link, PlatformAccountLinkService $links): JsonResponse
     {
         $data = $request->validate([
@@ -70,5 +93,31 @@ final class PlatformAccountLinkController extends Controller
         }
 
         return ApiResponse::success($request, $result, 201);
+    }
+
+    public function revokeInstallation(Request $request, string $link, string $installation, PlatformAccountLinkService $links): JsonResponse
+    {
+        try {
+            $result = $links->revokeInstallation(
+                $request->attributes->get('api_client'),
+                $link,
+                $installation,
+            );
+        } catch (PlatformAccountLinkException $exception) {
+            return ApiResponse::error($request, $exception->errorCode, $exception->getMessage(), $exception->status);
+        }
+
+        return ApiResponse::success($request, $result);
+    }
+
+    public function issueEnrollmentCode(Request $request, string $link, PlatformAccountLinkService $links): JsonResponse
+    {
+        try {
+            $result = $links->issueEnrollmentCode($request->attributes->get('api_client'), $link);
+        } catch (PlatformAccountLinkException $exception) {
+            return ApiResponse::error($request, $exception->errorCode, $exception->getMessage(), $exception->status);
+        }
+
+        return ApiResponse::success($request, $result, 201)->header('Cache-Control', 'no-store, private');
     }
 }

@@ -30,6 +30,26 @@ components:
           properties:
             request_id: { type: string, format: uuid }
 paths:
+  /installations/operational-sync-proof:
+    post:
+      summary: Sign an operational sync enrollment challenge for an active account-linked installation
+      description: Disabled by default. Requires the installation-scoped licensing bearer, not a product credential. Returns an Ed25519 signature over a short-lived purpose-bound challenge and installation, business, account-link, license and product identifiers. This proof is not a sync credential. The signed payload and enrollment code must be transmitted only over authenticated TLS.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [challenge]
+              properties:
+                challenge: { type: string, pattern: '^[a-f0-9]{64}$' }
+      responses:
+        '200': { description: Signed proof; cache-control no-store }
+        '401': { description: Invalid installation credential }
+        '403': { description: Installation, license or account link inactive }
+        '404': { description: Feature disabled }
+        '422': { description: Invalid challenge }
+        '503': { description: Signing unavailable }
   /products/{code}:
     get:
       summary: Retrieve the authenticated client's product
@@ -106,6 +126,109 @@ paths:
       parameters:
         - { name: grant_uuid, in: path, required: true, schema: { type: string, format: uuid } }
       responses: { '200': { description: Grant revoked }, '404': { description: Grant not found } }
+  /platform/account-links/requests:
+    post:
+      summary: Link a product license to one platform business
+      description: Requires licensing:account-link scope. The link is bound to the authenticated product and business UUID. Supply exactly one license_uuid or activation_code.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [business_uuid]
+              properties:
+                license_uuid: { type: string, format: uuid }
+                activation_code: { type: string }
+                business_uuid: { type: string, format: uuid }
+      responses: { '200': { description: Approved idempotent account link }, '202': { description: Pending account link }, '403': { description: Product or license not authorized }, '409': { description: License or business already linked } }
+  /platform/account-links/{link_uuid}:
+    get:
+      summary: Retrieve a linked account and current licensing snapshot
+      parameters:
+        - { name: link_uuid, in: path, required: true, schema: { type: string, format: uuid } }
+      responses: { '200': { description: Account link and current status }, '404': { description: Link not found } }
+    delete:
+      summary: Unlink a business and revoke its installations and outstanding activation codes
+      parameters:
+        - { name: link_uuid, in: path, required: true, schema: { type: string, format: uuid } }
+      responses: { '200': { description: Link and bound installations revoked }, '404': { description: Link not found } }
+  /platform/account-links/{link_uuid}/activation-codes:
+    post:
+      summary: Issue a short-lived activation code bound to one installation UUID
+      parameters:
+        - { name: link_uuid, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [installation_uuid]
+              properties:
+                installation_uuid: { type: string, format: uuid }
+                device_name: { type: string, maxLength: 255 }
+      responses: { '201': { description: One-time activation code; expires_at is included }, '403': { description: Link not approved or license inactive }, '409': { description: Installation already active } }
+  /platform/account-links/{link_uuid}/server-enrollment-codes:
+    post:
+      summary: Issue an account-bound, single-use server enrollment code
+      description: Requires licensing:account-link scope. Reserves an installation slot for 24 hours; the first successful exchange binds the code to that server's installation UUID. Retries for the same installation remain idempotent.
+      parameters:
+        - { name: link_uuid, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '201':
+          description: Secret shown once; returns link_uuid, activation_code_uuid, activation_code and expires_at
+          headers:
+            Cache-Control: { schema: { type: string }, description: no-store, private }
+        '403': { description: Link not approved or credential lacks scope }
+        '422': { description: License is inactive or installation limit reached }
+  /platform/account-links/{link_uuid}/installations:
+    get:
+      summary: List installations for an approved platform account link
+      description: Requires licensing:account-link scope and a link belonging to the authenticated product. Returns licensing records only, not server health or credentials.
+      parameters:
+        - { name: link_uuid, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: page, in: query, schema: { type: integer, minimum: 1, maximum: 1000000, default: 1 } }
+      responses:
+        '200':
+          description: A page of up to 25 installations with link_uuid, business_uuid, installations, current_page, last_page and total in the data envelope.
+          headers:
+            Cache-Control: { schema: { type: string }, description: no-store, private }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      link_uuid: { type: string, format: uuid }
+                      business_uuid: { type: string, format: uuid }
+                      current_page: { type: integer }
+                      last_page: { type: integer }
+                      total: { type: integer }
+                      installations:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            installation_uuid: { type: string, format: uuid }
+                            device_name: { type: [string, 'null'] }
+                            runtime_type: { type: [string, 'null'] }
+                            status: { type: string, enum: [active, deactivated, revoked] }
+                            activated_at: { type: [string, 'null'], format: date-time }
+                            last_verified_at: { type: [string, 'null'], format: date-time }
+                            expires_at: { type: [string, 'null'], format: date-time }
+        '403': { description: Link not approved or credential lacks scope }
+        '404': { description: Link not found for this product }
+        '422': { description: Invalid page }
+  /platform/account-links/{link_uuid}/installations/{installation_uuid}/revoke:
+    post:
+      summary: Revoke one installation and all outstanding activation codes bound to it
+      parameters:
+        - { name: link_uuid, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: installation_uuid, in: path, required: true, schema: { type: string, format: uuid } }
+      responses: { '200': { description: Installation and outstanding activation codes revoked }, '404': { description: Link or installation not found } }
   /licenses/verify:
     post:
       summary: Verify an active device license

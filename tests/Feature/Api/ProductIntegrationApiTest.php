@@ -111,8 +111,8 @@ final class ProductIntegrationApiTest extends TestCase
 
     public function test_license_redemption_claims_a_business_without_consuming_an_installation(): void
     {
-        [, $token] = $this->credential();
         $subscription = $this->subscription();
+        [, $token] = $this->credential($subscription->product->code);
         $subscription->entitlements()->create(['feature_key' => 'mode.sales', 'feature_name' => 'Sales', 'enabled' => true, 'limit_value' => null, 'source_plan_id' => $subscription->plan_id, 'effective_from' => now()]);
         $issued = app(LicenseService::class)->issue($subscription, 1);
         $businessUuid = (string) Str::uuid();
@@ -197,10 +197,10 @@ final class ProductIntegrationApiTest extends TestCase
         $this->assertDatabaseCount('license_installation_grants', 2);
     }
 
-    public function test_missing_subscription_snapshot_uses_plan_server_limit_for_entitlements_and_grants(): void
+    public function test_missing_subscription_snapshot_uses_plan_device_limits_for_entitlements_and_grants(): void
     {
-        [, $token] = $this->credential();
         $subscription = $this->subscription();
+        [, $token] = $this->credential($subscription->product->code);
         $subscription->plan->features()->create([
             'feature_key' => 'max_server_installations',
             'feature_name' => 'Business Server installations',
@@ -209,12 +209,22 @@ final class ProductIntegrationApiTest extends TestCase
             'limit_value' => '1',
             'sort_order' => 100,
         ]);
+        $subscription->plan->features()->create([
+            'feature_key' => 'max_client_app_devices',
+            'feature_name' => 'Business App devices',
+            'description' => 'Business App device limit',
+            'enabled' => true,
+            'limit_value' => '3',
+            'sort_order' => 101,
+        ]);
 
         $this->withToken($token)
             ->getJson('/api/v1/entitlements?subscription_uuid='.$subscription->uuid)
             ->assertOk()
             ->assertJsonPath('data.entitlements.0.key', 'max_server_installations')
-            ->assertJsonPath('data.entitlements.0.limit', 1);
+            ->assertJsonPath('data.entitlements.0.limit', 1)
+            ->assertJsonPath('data.entitlements.1.key', 'max_client_app_devices')
+            ->assertJsonPath('data.entitlements.1.limit', 3);
 
         $issued = app(LicenseService::class)->issue($subscription, 5);
         $businessUuid = (string) Str::uuid();

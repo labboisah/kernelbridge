@@ -339,6 +339,31 @@ Proceed only when Laravel and TypeScript tests cover old cache migration, fresh 
 - For Platform Account products, publish grant changes reliably using retry-safe, idempotent delivery. Prefer a transactional outbox so a committed platform plan change cannot silently lose its KernelBridge update; track acceptance and reconcile pending revisions.
 - Do not migrate roles or per-user permission assignments into KernelBridge entitlement records.
 
+#### Installation entitlement status screen
+
+Every product adapter must provide an authenticated, appropriately authorized installation-administration screen for the current license and effective entitlement snapshot. Use the MediFlow Installation Setup entitlement card as a presentation reference, not as a requirement to copy its Laravel implementation or styling. Keep this screen separate from the authorization boundary: all entitlements and user permissions must still be enforced server-side.
+
+The screen should present a compact status summary with these fields when available:
+
+| Screen field | Display requirement |
+|---|---|
+| Entitlement source | Show the verified bound source (`direct`, `product_platform`, or the installation's explicit Hybrid source). Label legacy or unavailable source information as such; never infer it from a plan name. |
+| License status | Show the lifecycle status and a safe reason when unusable. Make clear that an entitlement grant cannot reactivate an expired, suspended, or revoked license. |
+| Catalog revision | Show the catalog revision associated with the verified snapshot; use “not available” for legacy snapshots. |
+| Source revision | Show the accepted source-grant revision; do not present a pending or rejected platform update as active. |
+| Entitlement revision | Show the effective revision for this installation, not merely the latest account or platform revision. |
+| Snapshot age | Show age from the verified signed issue time where supported. Do not silently substitute the time the local page was rendered or refreshed. |
+| Last successful refresh | Show the last successful verification time, distinct from an attempted refresh. |
+| Offline access expires | Show the applicable bounded offline/grace expiry when available; explain that offline access does not renew or extend the subscription. |
+| Last verification error | Show only a safe, actionable error code or message. Never render raw exception details, credentials, activation codes, or signed payloads. |
+| Granted features and limits | List the effective capabilities/limits for this installation using product-owned display labels mapped from stable keys. If there are no grants, say so explicitly; do not imply that a locally selected package is active. |
+
+Provide a **Refresh subscription** or equivalent action that requests verification through the installed SDK's supported server-side flow. Require the product's normal administrator authorization and request protections. Report success only after verification and persistence succeed; show a safe failure state if verification fails, and retain only the last verified snapshot within the approved offline policy. The action must not edit cached state, change a source binding, or bypass signature, lifecycle, revision, or offline-grace validation.
+
+For KernelBridge-managed client installations, do not provide local plan, package, module, or capability selectors that can override the signed entitlement snapshot. Explain that access changes must be made by the authorized owner of the bound source, then refreshed. For Platform Account installations, link or direct the operator to the product platform's authorized account-plan workflow; for Direct installations, direct them to the approved KernelBridge subscription workflow. Hybrid installations must identify the active bound source and use only that source's authorized change flow. If the product supports local plans for explicitly standalone deployments, keep that UI isolated behind the explicit standalone mode and never let it appear as a fallback for a missing or invalid client entitlement.
+
+Show separate, explicit states for an unusable license, an absent or empty grant set, a stale snapshot, an active offline-grace snapshot, and a refresh failure. These states must not be presented as equivalent to an active, freshly verified entitlement. Avoid exposing other installations' grants or account data unless the signed, authorized product workflow explicitly requires it.
+
 **Checkpoint 8 — Server enforcement proven**
 
 Proceed only when:
@@ -349,6 +374,8 @@ Proceed only when:
 - Concurrent requests cannot exceed tested limits; downgrade/over-limit behavior preserves existing customer data.
 - Offline/stale-snapshot behavior follows the approved bounded policy and emits safe, useful diagnostics.
 - Platform grant updates survive retries, duplicates, temporary outages, and worker restarts; pending/rejected updates are visible for reconciliation.
+- The installation status screen shows source, lifecycle status, applicable revisions, freshness and refresh diagnostics, and effective grants without exposing secrets or offering an unauthorized local override.
+- Refresh-screen tests prove that successful verification updates displayed state, failed verification is not reported as success, and stale/offline states remain distinct from a fresh active snapshot.
 - Existing product roles, permissions, and licensing behavior remain unchanged outside the explicitly approved integration points.
 
 ### Phase 9 — Controlled pilot and operational readiness
@@ -395,6 +422,7 @@ Release only after clean artifact installation, upgrade and rollback tests, prod
 - Duplicate grant keys and malformed payload.
 - Wrong product/license/account-link association.
 - Stale, duplicate, and out-of-order revisions.
+- Installation status presentation for legacy/unavailable diagnostics, empty grants, and active granted features/limits.
 
 ### Lifecycle and source handling
 
@@ -402,6 +430,8 @@ Release only after clean artifact installation, upgrade and rollback tests, prod
 - Direct, Platform Account, and Hybrid with both direct and platform-linked installations.
 - Explicit Hybrid source transition, including unauthorized and stale transition attempts.
 - Platform grant update cannot restore or extend an invalid KernelBridge license.
+- Refresh action success, validation failure, temporary outage, and last-verified-snapshot retention within offline policy.
+- Local plan/package editing is unavailable in KernelBridge-managed client mode; any standalone selection UI is isolated from client mode.
 
 ### Reliability and security
 

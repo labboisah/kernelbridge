@@ -64,6 +64,28 @@ final class ProductManagementTest extends TestCase
             ->where('product.screenshots.0', 'https://cdn.example.com/dashboard.webp'));
     }
 
+    public function test_private_repository_settings_and_installation_guide_are_not_publicly_exposed(): void
+    {
+        $payload = $this->payload();
+        $payload['repository_url'] = 'https://github.com/acme/private-bridge-crm';
+        $payload['repository_visibility'] = 'private';
+        $payload['github_installation_id'] = '12345678';
+        $payload['stable_release_version'] = '2.3.0';
+        $payload['stable_release_tag'] = 'v2.3.0';
+        $payload['installation_guide_markdown'] = "# Install Bridge CRM\n\n<script>alert('x')</script>\n\n[unsafe](javascript:alert(1))";
+
+        $this->actingAs($this->administrator())->post(route('admin.products.store'), $payload)->assertRedirect();
+        $product = Product::query()->where('code', 'BRIDGECRM')->firstOrFail();
+
+        $this->get(route('products.show', $product->slug))->assertInertia(fn (Assert $page) => $page
+            ->missing('product.repository_url')
+            ->missing('product.github_installation_id')
+            ->missing('product.installation_guide_available')
+            ->missing('product.stable_release_version'));
+
+        $this->get('/products/'.$product->slug.'/installation')->assertNotFound();
+    }
+
     public function test_product_permissions_are_enforced_for_admin_routes(): void
     {
         $customer = User::factory()->create();

@@ -12,6 +12,18 @@ Open the admin dashboard, review health/monitoring, failed jobs, open urgent tic
 - Demo mode: publish product-owned restrictions/reset instructions. KernelBridge never directly resets a product database.
 - Staff access: assign only the role required for the job and review permission changes in audit logs.
 
+## Product installation delivery
+
+For products sold with a downloadable installation:
+
+1. In the product editor, configure its GitHub repository, visibility, stable version and exact Git tag. Add the customer-facing installation steps in Markdown.
+2. For a private repository, install KernelBridge's GitHub App on that repository with **Contents: read-only** access. Set `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY_PATH` on the server, keep the key outside the web root, and enter the installation ID in the product settings. Never put the App key or installation token in product metadata.
+3. Open the product's admin page and select **Build selected release**. A ready archive is stored on the private `local` disk. A configured Redis queue worker must be running; monitor failures with `php artisan queue:failed`. A failed build displays a safe failure code and can be retried.
+4. Confirm the selected release is ready before taking orders. Checkout rejects new purchases for a configured repository until its stable archive is ready and pins the exact release to the subscription.
+5. After finance verifies full payment, the customer's invoice page exposes the pinned project download, customer-portal installation guide, and licensing setup/activation links. These resources require customer ownership and paid invoice status; never send archive storage paths or public storage URLs to customers.
+
+The archive build requires PHP's Zip extension. Queue workers also require outbound HTTPS access to `api.github.com` and `codeload.github.com`. Changing the stable version does not change releases already pinned to paid subscriptions.
+
 ## Portal provisioning
 
 The customer first creates a login at `/register`. After identity and customer authority are verified, link that login to the commercial account:

@@ -4,9 +4,11 @@ namespace Tests\Feature;
 
 use App\Domain\Integration\Services\ApiCredentialService;
 use App\Domain\Licensing\Exceptions\InstallationVerificationException;
+use App\Domain\Licensing\Exceptions\PlatformAccountLinkException;
 use App\Domain\Licensing\Services\InstallationActivationService;
 use App\Domain\Licensing\Services\InstallationSeatAllocator;
 use App\Domain\Licensing\Services\LicenseService;
+use App\Domain\Licensing\Services\PlatformAccountLinkService;
 use App\Models\ApiClient;
 use App\Models\Customer;
 use App\Models\EntitlementCatalogRevision;
@@ -466,6 +468,13 @@ final class InstallationActivationServiceTest extends TestCase
     {
         [$product, $license] = $this->licenseFixture();
         $product->forceFill(['licensing_mode' => 'platform_account'])->save();
+        $license->subscription->entitlements()->create([
+            'feature_key' => 'adaptive_exam',
+            'feature_name' => 'Adaptive exams',
+            'enabled' => true,
+            'source_plan_id' => $license->subscription->plan_id,
+            'effective_from' => now()->subDay(),
+        ]);
         $client = ApiClient::query()->create([
             'product_id' => $product->id,
             'name' => 'Trusted platform backend',
@@ -487,6 +496,8 @@ final class InstallationActivationServiceTest extends TestCase
             ->assertJsonPath('data.license_status', 'active')
             ->assertJsonMissing(['activation_code' => $activationCode])
             ->json('data');
+        $this->assertSame($license->subscription->ends_at->toISOString(), $link['ends_at']);
+        $this->assertTrue(collect($link['entitlements'])->contains(fn ($item) => $item['key'] === 'adaptive_exam' && $item['enabled'] === true));
         $this->assertDatabaseMissing('license_business_claims', [
             'software_license_id' => $license->id,
             'business_uuid' => strtolower($businessUuid),
@@ -543,6 +554,8 @@ final class InstallationActivationServiceTest extends TestCase
 
         $signedPayload = json_decode($activated['signed_entitlements']['payload_json'], true);
         $this->assertSame(strtolower($businessUuid), $signedPayload['business_uuid']);
+        $this->assertTrue(collect($signedPayload['entitlements'])->contains(fn ($item) => $item['key'] === 'adaptive_exam' && $item['enabled'] === true));
+        $this->assertSame($license->subscription->ends_at->toIso8601String(), $signedPayload['expires_at']);
         $linkId = LicensePlatformAccountLink::query()->where('uuid', $link['uuid'])->value('id');
         $this->assertDatabaseHas('license_installations', [
             'installation_uuid' => $installationUuid,
@@ -550,6 +563,29 @@ final class InstallationActivationServiceTest extends TestCase
             'license_platform_account_link_id' => $linkId,
             'entitlement_source' => 'product_platform',
         ]);
+
+        $this->withToken($issuedCredential['token'])
+            ->deleteJson('/api/v1/platform/account-links/'.$link['uuid'])
+            ->assertOk()
+            ->assertJsonPath('data.uuid', $link['uuid'])
+            ->assertJsonPath('data.license_uuid', $license->uuid)
+            ->assertJsonPath('data.business_uuid', strtolower($businessUuid))
+            ->assertJsonPath('data.status', 'revoked')
+            ->assertJsonPath('data.installations_revoked', 1);
+
+        $this->assertSame('revoked', $linkRecord->fresh()->status);
+        $this->assertSame('revoked', LicenseInstallation::query()->where('installation_uuid', $installationUuid)->value('status'));
+        $this->assertSame(0, app(InstallationSeatAllocator::class)->used($license));
+
+        $replacement = $this->withToken($issuedCredential['token'])
+            ->postJson('/api/v1/platform/account-links/requests', [
+                'license_uuid' => $license->uuid,
+                'business_uuid' => $businessUuid,
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.status', 'approved')
+            ->json('data');
+        $this->assertNotSame($link['uuid'], $replacement['uuid']);
     }
 
     public function test_installation_can_deactivate_with_its_credential_and_release_its_seat_idempotently(): void
@@ -583,6 +619,202 @@ final class InstallationActivationServiceTest extends TestCase
             'entity_type' => LicenseInstallation::class,
         ]);
         $this->assertNotNull($service->authenticate($activation['credential']));
+    }
+
+    public function test_platform_account_credential_can_revoke_one_installation_without_unlinking_the_business(): void
+    {
+        [$product, $license] = $this->licenseFixture(3);
+        $product->forceFill(['licensing_mode' => 'platform_account'])->save();
+        $client = ApiClient::query()->create([
+            'product_id' => $product->id,
+            'name' => 'Trusted platform backend',
+            'is_active' => true,
+            'rate_limit_per_minute' => 120,
+            'scopes' => ['licensing:account-link'],
+        ]);
+        $issuedCredential = app(ApiCredentialService::class)->issue($client, 'platform-backend');
+        $businessUuid = (string) Str::uuid();
+        $link = $this->withToken($issuedCredential['token'])->postJson('/api/v1/platform/account-links/requests', [
+            'activation_code' => app(LicenseService::class)->key($license),
+            'business_uuid' => $businessUuid,
+        ])->assertOk()->json('data');
+        $installationUuid = (string) Str::uuid();
+        $code = $this->withToken($issuedCredential['token'])
+            ->postJson('/api/v1/platform/account-links/'.$link['uuid'].'/activation-codes', [
+                'installation_uuid' => $installationUuid,
+                'device_name' => 'MediFlow server',
+            ])->assertCreated()->json('data.activation_code');
+        $activation = $this->postJson('/api/v1/installations/activate', [
+            'activation_code' => $code,
+            'product_code' => $product->code,
+            'installation_uuid' => $installationUuid,
+        ])->assertCreated()->json('data');
+
+        $this->withToken($issuedCredential['token'])
+            ->postJson('/api/v1/platform/account-links/'.$link['uuid'].'/installations/'.$installationUuid.'/revoke')
+            ->assertOk()
+            ->assertJsonPath('data.status', 'revoked')
+            ->assertJsonPath('data.installations_revoked', 1)
+            ->assertJsonPath('data.activation_codes_revoked', 0);
+
+        $this->withToken($activation['credential'])->postJson('/api/v1/installations/verify')
+            ->assertForbidden()
+            ->assertJsonPath('error.code', 'installation_revoked');
+        $this->withToken($issuedCredential['token'])
+            ->getJson('/api/v1/platform/account-links/'.$link['uuid'])
+            ->assertOk()
+            ->assertJsonPath('data.status', 'approved');
+        $this->assertSame(0, app(InstallationSeatAllocator::class)->used($license));
+
+        $pendingInstallationUuid = (string) Str::uuid();
+        $pendingCode = $this->withToken($issuedCredential['token'])
+            ->postJson('/api/v1/platform/account-links/'.$link['uuid'].'/activation-codes', [
+                'installation_uuid' => $pendingInstallationUuid,
+                'device_name' => 'Pending server',
+            ])->assertCreated()
+            ->json('data.activation_code');
+        $this->withToken($issuedCredential['token'])
+            ->postJson('/api/v1/platform/account-links/'.$link['uuid'].'/installations/'.$pendingInstallationUuid.'/revoke')
+            ->assertOk()
+            ->assertJsonPath('data.status', 'revoked')
+            ->assertJsonPath('data.installations_revoked', 0)
+            ->assertJsonPath('data.activation_codes_revoked', 1);
+        $this->assertDatabaseHas('license_activation_codes', [
+            'license_platform_account_link_id' => LicensePlatformAccountLink::query()->where('uuid', $link['uuid'])->value('id'),
+            'bound_installation_uuid' => $pendingInstallationUuid,
+            'status' => 'revoked',
+        ]);
+        $this->postJson('/api/v1/installations/activate', [
+            'activation_code' => $pendingCode,
+            'product_code' => $product->code,
+            'installation_uuid' => $pendingInstallationUuid,
+        ])->assertUnprocessable()
+            ->assertJsonPath('error.code', 'activation_code_revoked');
+
+        $this->withToken($issuedCredential['token'])
+            ->postJson('/api/v1/platform/account-links/'.$link['uuid'].'/installations/'.Str::uuid().'/revoke')
+            ->assertNotFound()
+            ->assertJsonPath('error.code', 'installation_not_found');
+    }
+
+    public function test_unbound_platform_enrollment_code_binds_first_server_and_preserves_account_entitlements(): void
+    {
+        [$product, $license] = $this->licenseFixture(1);
+        $product->forceFill(['licensing_mode' => 'platform_account'])->save();
+        $client = ApiClient::query()->create([
+            'product_id' => $product->id,
+            'name' => 'Trusted platform backend',
+            'is_active' => true,
+            'rate_limit_per_minute' => 120,
+            'scopes' => ['licensing:account-link'],
+        ]);
+        $links = app(PlatformAccountLinkService::class);
+        $businessUuid = (string) Str::uuid();
+        $link = $links->request($client, $license->uuid, $businessUuid);
+        $credential = app(ApiCredentialService::class)->issue($client, 'enrollment-test');
+        $endpoint = '/api/v1/platform/account-links/'.$link['uuid'].'/server-enrollment-codes';
+        $this->postJson($endpoint)->assertUnauthorized();
+        $issued = $this->withToken($credential['token'])->postJson($endpoint)
+            ->assertCreated()->assertHeader('Cache-Control', 'no-store, private')->json('data');
+        $this->assertSame(1, app(InstallationSeatAllocator::class)->used($license));
+        $this->assertDatabaseHas('license_activation_codes', [
+            'uuid' => $issued['activation_code_uuid'],
+            'bound_installation_uuid' => null,
+            'status' => 'issued',
+            'entitlement_source' => 'product_platform',
+        ]);
+        $this->assertEqualsWithDelta(86400, now()->diffInSeconds(Carbon::parse($issued['expires_at'])), 5);
+
+        $serverUuid = (string) Str::uuid();
+        $payload = ['activation_code' => $issued['activation_code'], 'product_code' => $product->code, 'installation_uuid' => $serverUuid];
+        $result = $this->postJson('/api/v1/installations/activate', $payload)->assertCreated()->json('data');
+        $claims = json_decode($result['signed_entitlements']['payload_json'], true, flags: JSON_THROW_ON_ERROR);
+        $this->assertSame(strtolower($businessUuid), $claims['business_uuid']);
+        $this->assertSame($serverUuid, $claims['installation_uuid']);
+        $challenge = hash('sha256', 'synthetic sync enrollment secret');
+        $this->withToken($result['credential'])
+            ->postJson('/api/v1/installations/operational-sync-proof', ['challenge' => $challenge])->assertNotFound();
+        config(['product_integration.operational_sync_proof_enabled' => true]);
+        $proof = $this->withToken($result['credential'])
+            ->postJson('/api/v1/installations/operational-sync-proof', ['challenge' => $challenge])
+            ->assertOk()->assertHeader('Cache-Control', 'no-store, private')->json('data');
+        $proofClaims = json_decode($proof['payload_json'], true, flags: JSON_THROW_ON_ERROR);
+        $key = base64_decode(config('product_integration.signing.secret_key'), true);
+        $this->assertTrue(sodium_crypto_sign_verify_detached(base64_decode($proof['signature'], true), $proof['payload_json'], sodium_crypto_sign_publickey_from_secretkey($key)));
+        $this->assertSame('mediflow.operational-sync.enrollment', $proofClaims['purpose']);
+        $this->assertSame($challenge, $proofClaims['challenge']);
+        $this->assertSame($serverUuid, $proofClaims['installation_uuid']);
+        $this->assertSame($link['uuid'], $proofClaims['platform_account_link_uuid']);
+        $this->assertSame(strtolower($businessUuid), $proofClaims['business_uuid']);
+        $this->withToken('invalid-credential')->postJson('/api/v1/installations/operational-sync-proof', ['challenge' => $challenge])->assertUnauthorized();
+        $this->withToken($result['credential'])->postJson('/api/v1/installations/operational-sync-proof', ['challenge' => 'invalid'])->assertUnprocessable();
+        $this->assertSame($license->subscription->ends_at->toIso8601String(), $claims['expires_at']);
+        $this->assertSame(1, app(InstallationSeatAllocator::class)->used($license));
+        $inventoryUrl = '/api/v1/platform/account-links/'.$link['uuid'].'/installations';
+        $this->withToken('invalid-credential')->getJson($inventoryUrl)->assertUnauthorized();
+        $inventory = $this->withToken($credential['token'])->getJson($inventoryUrl)
+            ->assertOk()->assertHeader('Cache-Control', 'no-store, private')
+            ->assertJsonPath('data.link_uuid', $link['uuid'])
+            ->assertJsonPath('data.business_uuid', strtolower($businessUuid))
+            ->assertJsonPath('data.installations.0.installation_uuid', $serverUuid)
+            ->assertJsonPath('data.installations.0.status', 'active')
+            ->assertJsonPath('data.total', 1)->json('data');
+        $this->assertArrayNotHasKey('credential_hash', $inventory['installations'][0]);
+        $this->assertArrayNotHasKey('credential_encrypted', $inventory['installations'][0]);
+        $otherProduct = Product::factory()->create();
+        $otherClient = ApiClient::query()->create([
+            'product_id' => $otherProduct->id, 'name' => 'Other product', 'is_active' => true,
+            'rate_limit_per_minute' => 120, 'scopes' => ['licensing:account-link'],
+        ]);
+        $otherToken = app(ApiCredentialService::class)->issue($otherClient, 'other-product')['token'];
+        $this->withToken($otherToken)->getJson($inventoryUrl)->assertNotFound();
+        $noScope = ApiClient::query()->create([
+            'product_id' => $product->id, 'name' => 'Unscoped client', 'is_active' => true,
+            'rate_limit_per_minute' => 120, 'scopes' => ['mcp:read'],
+        ]);
+        $noScopeToken = app(ApiCredentialService::class)->issue($noScope, 'unscoped')['token'];
+        $this->withToken($noScopeToken)->getJson($inventoryUrl)->assertForbidden();
+        $this->withToken($credential['token'])->getJson($inventoryUrl.'?page=2')
+            ->assertOk()->assertJsonPath('data.current_page', 2)->assertJsonCount(0, 'data.installations');
+        $this->withToken($credential['token'])->getJson($inventoryUrl.'?page=0')->assertUnprocessable();
+        $this->withToken($credential['token'])->getJson('/api/v1/platform/account-links/'.Str::uuid().'/installations')->assertNotFound();
+        $this->postJson('/api/v1/installations/activate', array_merge($payload, ['installation_uuid' => (string) Str::uuid()]))
+            ->assertStatus(409)->assertJsonPath('error.code', 'activation_code_used');
+        $links->unlink($client, $link['uuid']);
+        $this->withToken($result['credential'])->postJson('/api/v1/installations/operational-sync-proof', ['challenge' => $challenge])->assertForbidden();
+        $this->withToken($credential['token'])->getJson($inventoryUrl)->assertForbidden();
+        $this->withToken($result['credential'])->postJson('/api/v1/installations/verify')->assertForbidden();
+    }
+
+    public function test_unbound_enrollment_requires_scope_and_an_approved_product_link(): void
+    {
+        [$product, $license] = $this->licenseFixture(1);
+        $product->forceFill(['licensing_mode' => 'platform_account'])->save();
+        $client = ApiClient::query()->create([
+            'product_id' => $product->id,
+            'name' => 'Platform backend',
+            'is_active' => true,
+            'rate_limit_per_minute' => 120,
+            'scopes' => ['licensing:account-link'],
+        ]);
+        $links = app(PlatformAccountLinkService::class);
+        $link = $links->request($client, $license->uuid, (string) Str::uuid());
+        $client->forceFill(['scopes' => ['mcp:read']])->save();
+        try {
+            $links->issueEnrollmentCode($client, $link['uuid']);
+            $this->fail('A credential without the account-link scope must not issue an enrollment code.');
+        } catch (PlatformAccountLinkException $exception) {
+            $this->assertSame('insufficient_scope', $exception->errorCode);
+        }
+        $client->forceFill(['scopes' => ['licensing:account-link']])->save();
+        LicensePlatformAccountLink::query()->where('uuid', $link['uuid'])->update(['status' => 'revoked']);
+        try {
+            $links->issueEnrollmentCode($client, $link['uuid']);
+            $this->fail('A revoked link must not issue an enrollment code.');
+        } catch (PlatformAccountLinkException $exception) {
+            $this->assertSame('platform_account_not_approved', $exception->errorCode);
+        }
+        $this->assertSame(0, app(InstallationSeatAllocator::class)->used($license));
     }
 
     public function test_replacing_an_unused_code_reuses_its_seat_and_revokes_the_old_code(): void

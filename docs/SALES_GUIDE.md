@@ -20,3 +20,5 @@ Use activity history for factual events and notes for context. Never store passw
 ## Handoff to finance and onboarding
 
 After acceptance, convert the quotation and notify finance. Confirm the billing contact and tax details. Subscription/license activation occurs only after verified payment. Once converted to a customer, coordinate identity verification and portal linking with an administrator.
+
+For products with a downloadable installation, confirm the product's selected stable release is ready before promising delivery. After payment is verified, direct the customer to the paid invoice in their portal to download the project and open its customer-portal installation guide. The same invoice provides licensing configuration and activation instructions; do not email activation secrets or private repository links.
