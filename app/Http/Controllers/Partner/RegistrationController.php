@@ -6,6 +6,7 @@ use App\Enums\UserRole;
 use App\Http\Controllers\Controller;
 use App\Models\PartnerApplication;
 use App\Models\User;
+use Illuminate\Auth\Events\Registered;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -24,6 +25,8 @@ class RegistrationController extends Controller
 
             return $user;
         });
+        event(new Registered($user));
+
         Auth::login($user);
         $request->session()->regenerate();
         $request->session()->forget(['url.intended', 'partner_registration']);

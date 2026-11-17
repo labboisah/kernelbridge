@@ -40,7 +40,7 @@ use Illuminate\Support\Facades\Route;
 
 Route::get('/', HomeController::class)->name('home');
 Route::post('/partners/{type}/register', [\App\Http\Controllers\Partner\RegistrationController::class, 'store'])->middleware(['guest', 'throttle:5,1'])->name('partners.register.store');
-Route::prefix('partner')->name('partner.')->middleware('auth')->group(function () {
+Route::prefix('partner')->name('partner.')->middleware(['auth', 'verified'])->group(function () {
     $controller = \App\Http\Controllers\Partner\PortalController::class;
     Route::get('/', [$controller, 'dashboard'])->name('dashboard');
     Route::get('/clients', [$controller, 'customers'])->name('customers');
@@ -60,7 +60,7 @@ Route::prefix('partner')->name('partner.')->middleware('auth')->group(function (
 });
 Route::get('/partners', [\App\Http\Controllers\PublicSite\PartnerController::class, 'index'])->name('partners.index');
 Route::get('/partners/{type}/register', [\App\Http\Controllers\PublicSite\PartnerController::class, 'start'])->name('partners.register');
-Route::middleware('auth')->group(function () {
+Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/partners/{type}/onboarding', [\App\Http\Controllers\PublicSite\PartnerController::class, 'edit'])->name('partners.onboarding');
     Route::post('/partners/{type}/onboarding', [\App\Http\Controllers\PublicSite\PartnerController::class, 'save'])->middleware('throttle:10,1')->name('partners.save');
 });

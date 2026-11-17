@@ -2,8 +2,11 @@
 
 namespace Tests\Feature\Auth;
 
+use App\Models\User;
 use Database\Seeders\RoleAndPermissionSeeder;
+use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Notification;
 use Tests\TestCase;
 
 class RegistrationTest extends TestCase
@@ -38,6 +41,22 @@ class RegistrationTest extends TestCase
         $response->assertRedirect(route('dashboard', absolute: false));
         $this->assertDatabaseHas('customers', ['email' => 'test@example.com', 'phone' => '+2348000000000', 'type' => 'individual', 'status' => 'prospect']);
         $this->assertDatabaseHas('customer_user', ['is_primary' => true]);
+    }
+
+    public function test_registration_sends_a_verification_email_and_blocks_unverified_access(): void
+    {
+        Notification::fake();
+
+        $this->post('/register', [
+            'name' => 'Verify Me', 'account_type' => 'individual', 'phone' => '+2348000000001',
+            'email' => 'verify@example.com', 'password' => 'password', 'password_confirmation' => 'password',
+        ]);
+
+        $user = User::where('email', 'verify@example.com')->firstOrFail();
+        $this->assertNull($user->email_verified_at);
+        Notification::assertSentTo($user, VerifyEmail::class);
+        $this->get('/dashboard')->assertRedirect(route('verification.notice'));
+        $this->get('/account/services')->assertRedirect(route('verification.notice'));
     }
 
     public function test_organization_can_register_a_customer_account(): void
