@@ -3,9 +3,17 @@
 namespace Tests\Feature;
 
 use App\Models\PartnerApplication;
+use App\Models\PartnerBankDetails;
 use App\Models\User;
+use App\Notifications\PartnerApplicationApproved;
 use Database\Seeders\RoleAndPermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Notifications\SendQueuedNotifications;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
 
@@ -69,8 +77,60 @@ class PartnerOnboardingTest extends TestCase
         $this->get('/partners/administrator/register')->assertNotFound();
     }
 
+    public function test_guided_responses_resume_and_are_visible_to_applicant_and_admin_without_losing_legacy_answers(): void
+    {
+        $user = User::factory()->create();
+        $this->actingAs($user)->post('/partners/developer/onboarding', ['action' => 'save', 'background_knowledge' => 'Existing background']);
+        $answers = [
+            'background_areas' => ['Healthcare', 'Software and technology'],
+            'digital_skills' => ['Email and internet', 'Technical support'],
+            'experience_level' => 'Intermediate',
+            'installation_experience' => 'Yes',
+            'installation_skills' => ['Install applications'],
+            'networking_experience' => 'No',
+            'networking_skills' => [],
+            'business_skills' => ['Sales'],
+            'management_experience' => null,
+            'management_skills' => [],
+        ];
+        $this->post('/partners/developer/onboarding', ['action' => 'save', 'guided_answers' => json_encode($answers, JSON_THROW_ON_ERROR)])->assertRedirect();
+        $application = PartnerApplication::firstOrFail();
+        $this->assertSame($answers, $application->guided_answers);
+        $this->assertSame('Existing background', $application->background_knowledge);
+        $this->get('/partners/developer/onboarding')->assertInertia(fn (Assert $p) => $p
+            ->where('application.guided_answers.installation_experience', 'Yes')
+            ->where('application.guided_answers.networking_experience', 'No')
+            ->where('application.guided_answers.digital_skills', ['Email and internet', 'Technical support'])
+            ->where('questionnaire.0.questions.2.type', 'single'));
+
+        $answers['digital_skills'] = [];
+        $this->post('/partners/developer/onboarding', $this->submission() + ['guided_answers' => json_encode($answers, JSON_THROW_ON_ERROR)])->assertRedirect();
+        $this->assertSame([], $application->fresh()->guided_answers['digital_skills']);
+        $this->get('/partners/developer/onboarding')->assertInertia(fn (Assert $p) => $p->where('application.background_knowledge', 'Existing background')->where('application.guided_answers.experience_level', 'Intermediate'));
+
+        $admin = User::factory()->create();
+        $admin->assignRole('admin');
+        $this->actingAs($admin)->get('/admin/partners')->assertInertia(fn (Assert $p) => $p
+            ->where('applications.data.0.guided_answers.installation_experience', 'Yes')
+            ->where('applications.data.0.background_knowledge', 'Existing background')
+            ->has('questionnaire', 3));
+    }
+
+    public function test_guided_answers_reject_invalid_values_and_unknown_questions(): void
+    {
+        $this->actingAs(User::factory()->create());
+        $url = '/partners/developer/onboarding';
+        $this->post($url, ['action' => 'save', 'guided_answers' => '{'])->assertSessionHasErrors('guided_answers');
+        $this->post($url, ['action' => 'save', 'guided_answers' => json_encode(['experience_level' => 'Expert plus', 'installation_experience' => 'Maybe', 'digital_skills' => ['Invalid']], JSON_THROW_ON_ERROR)])
+            ->assertSessionHasErrors(['answers.experience_level', 'answers.installation_experience', 'answers.digital_skills.0']);
+        $this->post($url, ['action' => 'save', 'guided_answers' => json_encode(['unknown' => 'Yes'], JSON_THROW_ON_ERROR)])->assertSessionHasErrors('answers');
+        $this->post($url, ['action' => 'save', 'guided_answers' => json_encode(['digital_skills' => ['Technical support', 'Technical support']], JSON_THROW_ON_ERROR)])->assertSessionHasErrors('answers.digital_skills.0');
+        $this->assertDatabaseCount('partner_applications', 0);
+    }
+
     public function test_only_admin_can_review_and_decision_is_visible_to_owner(): void
     {
+        Notification::fake();
         $user = User::factory()->create();
         $user->assignRole('customer');
         $this->actingAs($user)->post('/partners/sales_agent/onboarding', $this->submission());
@@ -83,7 +143,100 @@ class PartnerOnboardingTest extends TestCase
         $this->actingAs($admin)->get('/admin/partners')->assertOk();
         $this->put('/admin/partners/'.$application->id, $review)->assertRedirect();
         $this->assertDatabaseHas('partner_applications', ['id' => $application->id, 'status' => 'approved', 'reviewed_by' => $admin->id]);
+        Notification::assertSentTo($user, PartnerApplicationApproved::class, function ($notification) use ($user) {
+            return $notification->type === 'sales_agent'
+                && $notification->toMail($user)->actionUrl === route('partner.bank.edit');
+        });
+        $this->put('/admin/partners/'.$application->id, $review)->assertStatus(409);
+        Notification::assertSentToTimes($user, PartnerApplicationApproved::class, 1);
         $this->actingAs($user)->get('/partners/sales_agent/onboarding')->assertInertia(fn (Assert $p) => $p->where('application.review_note', $review['review_note']));
         $this->assertFalse($user->fresh()->hasRole('sales'));
+    }
+
+    public function test_rejected_application_does_not_send_approval_or_allow_bank_details(): void
+    {
+        Notification::fake();
+        $user = User::factory()->create();
+        $this->actingAs($user)->post('/partners/developer/onboarding', $this->submission());
+        $application = PartnerApplication::firstOrFail();
+        $this->get(route('partner.bank.edit'))->assertForbidden();
+        $this->put(route('partner.bank.update'), ['bank_name' => 'Bank', 'account_name' => 'Name', 'account_number' => '123'])->assertForbidden();
+        $admin = User::factory()->create();
+        $admin->assignRole('admin');
+        $this->actingAs($admin)->put('/admin/partners/'.$application->id, ['status' => 'declined', 'review_note' => 'Not approved'])->assertRedirect();
+        Notification::assertNotSentTo($user, PartnerApplicationApproved::class);
+        $this->actingAs($user)->get(route('partner.bank.edit'))->assertForbidden();
+    }
+
+    public function test_approval_queues_an_email_for_the_applicant(): void
+    {
+        Queue::fake();
+        $user = User::factory()->create();
+        $this->actingAs($user)->post('/partners/investor/onboarding', $this->submission());
+        $application = PartnerApplication::firstOrFail();
+        $admin = User::factory()->create();
+        $admin->assignRole('admin');
+        $this->actingAs($admin)->put('/admin/partners/'.$application->id, ['status' => 'approved', 'review_note' => 'Welcome'])->assertRedirect();
+        Queue::assertPushed(SendQueuedNotifications::class, function ($job) use ($user) {
+            return $job->notification instanceof PartnerApplicationApproved
+                && $job->notification->afterCommit === true
+                && $job->notifiables->contains('id', $user->id);
+        });
+    }
+
+    public function test_approved_partner_bank_details_are_encrypted_and_restricted_to_owner_and_admin(): void
+    {
+        Notification::fake();
+        $user = User::factory()->create();
+        $this->actingAs($user)->post('/partners/developer/onboarding', $this->submission());
+        $application = PartnerApplication::firstOrFail();
+        $admin = User::factory()->create();
+        $admin->assignRole('admin');
+        $this->actingAs($admin)->put('/admin/partners/'.$application->id, ['status' => 'approved', 'review_note' => 'Welcome'])->assertRedirect();
+
+        $details = ['bank_name' => 'Example Bank', 'account_name' => 'Partner Name', 'account_number' => '0012345678'];
+        $this->actingAs($user)->put(route('partner.bank.update'), $details)->assertRedirect(route('partner.bank.edit'));
+        $this->put(route('partner.bank.update'), ['bank_name' => '', 'account_name' => $details['account_name'], 'account_number' => $details['account_number']])
+            ->assertSessionHasErrors('bank_name')->assertSessionMissing('_old_input.account_number');
+        $raw = DB::table('partner_bank_details')->where('user_id', $user->id)->first();
+        foreach ($details as $field => $value) {
+            $this->assertNotSame($value, $raw->$field);
+        }
+        $this->assertSame($details['account_number'], PartnerBankDetails::where('user_id', $user->id)->firstOrFail()->account_number);
+        $this->get(route('partner.bank.edit'))->assertHeader('Cache-Control', 'no-store, private')
+            ->assertInertia(fn (Assert $p) => $p->where('bankDetails.account_number', $details['account_number']));
+        $this->actingAs(User::factory()->create())->get(route('partner.bank.edit'))->assertForbidden();
+        $this->get('/admin/partners')->assertForbidden();
+        $this->actingAs($admin)->get('/admin/partners')->assertHeader('Cache-Control', 'no-store, private')
+            ->assertInertia(fn (Assert $p) => $p->where('applications.data.0.bank_details.account_number', $details['account_number']));
+    }
+
+    public function test_experience_and_private_photo_are_saved_and_only_owner_or_admin_can_view_photo(): void
+    {
+        Storage::fake('local');
+        $user = User::factory()->create();
+        $photo = UploadedFile::fake()->image('photo.jpg');
+        $this->actingAs($user)->post('/partners/developer/onboarding', [
+            'action' => 'save', 'background_knowledge' => 'Healthcare software', 'digital_skills' => 'Word processing',
+            'installation_experience' => 'Workstation setup', 'networking_experience' => 'LAN', 'business_skills' => 'Sales',
+            'management_skills' => 'Team leadership', 'photo' => $photo,
+        ])->assertRedirect();
+        $application = PartnerApplication::firstOrFail();
+        Storage::disk('local')->assertExists($application->photo_path);
+        $this->get('/partners/developer/onboarding')->assertInertia(fn (Assert $p) => $p
+            ->where('application.background_knowledge', 'Healthcare software')
+            ->where('application.management_skills', 'Team leadership')
+            ->where('application.has_photo', true)
+            ->missing('application.photo_path'));
+        $this->get(route('partners.photo', $application))->assertOk()->assertHeader('Cache-Control', 'no-store, private');
+        $this->actingAs(User::factory()->create())->get(route('partners.photo', $application))->assertForbidden();
+        $admin = User::factory()->create();
+        $admin->assignRole('admin');
+        $this->actingAs($admin)->get(route('partners.photo', $application))->assertOk();
+        $this->actingAs($user)->post('/partners/developer/onboarding', ['action' => 'save', 'photo' => UploadedFile::fake()->create('bad.pdf', 20, 'application/pdf')])->assertSessionHasErrors('photo');
+        $oldPhoto = $application->photo_path;
+        $this->post('/partners/developer/onboarding', ['action' => 'save', 'photo' => UploadedFile::fake()->image('replacement.png')])->assertRedirect();
+        Storage::disk('local')->assertMissing($oldPhoto);
+        Storage::disk('local')->assertExists($application->fresh()->photo_path);
     }
 }

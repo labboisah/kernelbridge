@@ -51,6 +51,7 @@ return Application::configure(basePath: dirname(__DIR__))
         //
     })
     ->withExceptions(function (Exceptions $exceptions) {
+        $exceptions->dontFlash(['bank_name', 'account_name', 'account_number']);
         $exceptions->shouldRenderJsonWhen(fn (Request $request): bool => $request->is('api/*') || $request->expectsJson());
         $exceptions->render(function (Throwable $exception, Request $request) {
             if (! $request->is('api/v1/*')) {
@@ -70,4 +71,3 @@ return Application::configure(basePath: dirname(__DIR__))
             return ApiResponse::error($request, 'server_error', 'An unexpected error occurred.', 500);
         });
     })->create();
-

@@ -1,1 +1,0 @@
-import{o as e,c as r,F as a,f as n,t as c,e as l}from"./app-1_PAioCQ.js";const m={key:0,role:"alert",class:"rounded-lg bg-red-50 p-4 text-sm text-red-700"},_={__name:"FormErrors",props:{errors:Object},setup(t){return(u,d)=>Object.keys(t.errors).length?(e(),r("ul",m,[(e(!0),r(a,null,n(t.errors,(s,o)=>(e(),r("li",{key:o},c(s),1))),128))])):l("",!0)}};export{_};

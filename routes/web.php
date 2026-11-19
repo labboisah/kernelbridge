@@ -43,6 +43,8 @@ Route::post('/partners/{type}/register', [\App\Http\Controllers\Partner\Registra
 Route::prefix('partner')->name('partner.')->middleware(['auth', 'verified'])->group(function () {
     $controller = \App\Http\Controllers\Partner\PortalController::class;
     Route::get('/', [$controller, 'dashboard'])->name('dashboard');
+    Route::get('/bank-details', [\App\Http\Controllers\Partner\BankDetailsController::class, 'edit'])->name('bank.edit');
+    Route::put('/bank-details', [\App\Http\Controllers\Partner\BankDetailsController::class, 'update'])->middleware('throttle:10,1')->name('bank.update');
     Route::get('/clients', [$controller, 'customers'])->name('customers');
     Route::post('/clients', [$controller, 'storeCustomer'])->middleware('throttle:20,1')->name('customers.store');
     Route::put('/clients/{customer}', [$controller, 'updateCustomer'])->name('customers.update');
@@ -63,6 +65,7 @@ Route::get('/partners/{type}/register', [\App\Http\Controllers\PublicSite\Partne
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/partners/{type}/onboarding', [\App\Http\Controllers\PublicSite\PartnerController::class, 'edit'])->name('partners.onboarding');
     Route::post('/partners/{type}/onboarding', [\App\Http\Controllers\PublicSite\PartnerController::class, 'save'])->middleware('throttle:10,1')->name('partners.save');
+    Route::get('/partner-applications/{application}/photo', [\App\Http\Controllers\PublicSite\PartnerController::class, 'photo'])->name('partners.photo');
 });
 Route::get('/health', HealthController::class)->middleware('throttle:30,1')->name('health');
 Route::get('/products', [ProductController::class, 'index'])->name('products.index');
