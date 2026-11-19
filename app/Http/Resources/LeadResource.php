@@ -16,6 +16,7 @@ final class LeadResource extends JsonResource
             'number_of_users' => $this->number_of_users, 'source' => $this->source, 'status' => $this->status->value,
             'follow_up_date' => $this->follow_up_date?->toDateString(), 'assigned_to' => $this->assigned_to,
             'product_id' => $this->product_id, 'product' => $this->whenLoaded('product'), 'assigned_user' => $this->whenLoaded('assignedUser'),
+            'partner_owner' => $this->whenLoaded('partnerOwner'), 'stage_history' => $this->whenLoaded('stageHistory'),
             'converted_customer' => $this->whenLoaded('convertedCustomer'), 'demo_requests' => $this->whenLoaded('demoRequests'),
             'activities' => $this->whenLoaded('activities'), 'notes' => $this->whenLoaded('notes'), 'created_at' => $this->created_at?->toIso8601String(),
         ];

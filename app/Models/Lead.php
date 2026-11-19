@@ -19,6 +19,23 @@ final class Lead extends Model
     protected static function booted(): void
     {
         self::creating(fn (self $lead) => $lead->uuid ??= (string) Str::uuid());
+        self::created(function (self $lead): void {
+            $lead->recordStage();
+        });
+        self::updated(function (self $lead): void {
+            if ($lead->wasChanged('status')) {
+                $lead->recordStage();
+            }
+        });
+    }
+
+    private function recordStage(): void
+    {
+        $this->stageHistory()->create([
+            'status' => $this->status ?? LeadStatus::New,
+            'actor_id' => auth()->id(),
+            'entered_at' => now(),
+        ]);
     }
 
     protected function casts(): array
@@ -41,6 +58,11 @@ final class Lead extends Model
         return $this->belongsTo(User::class, 'assigned_to');
     }
 
+    public function partnerOwner(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'partner_user_id');
+    }
+
     public function convertedCustomer(): BelongsTo
     {
         return $this->belongsTo(Customer::class, 'converted_customer_id');
@@ -54,6 +76,11 @@ final class Lead extends Model
     public function activities(): HasMany
     {
         return $this->hasMany(LeadActivity::class)->latest();
+    }
+
+    public function stageHistory(): HasMany
+    {
+        return $this->hasMany(LeadStageHistory::class)->orderBy('entered_at')->orderBy('id');
     }
 
     public function notes(): HasMany

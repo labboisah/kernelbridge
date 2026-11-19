@@ -45,6 +45,11 @@ Route::prefix('partner')->name('partner.')->middleware(['auth', 'verified'])->gr
     Route::get('/', [$controller, 'dashboard'])->name('dashboard');
     Route::get('/bank-details', [\App\Http\Controllers\Partner\BankDetailsController::class, 'edit'])->name('bank.edit');
     Route::put('/bank-details', [\App\Http\Controllers\Partner\BankDetailsController::class, 'update'])->middleware('throttle:10,1')->name('bank.update');
+    Route::get('/crm', [\App\Http\Controllers\Partner\CrmController::class, 'index'])->name('crm.index');
+    Route::post('/crm', [\App\Http\Controllers\Partner\CrmController::class, 'store'])->middleware('throttle:20,1')->name('crm.store');
+    Route::get('/crm/{lead}', [\App\Http\Controllers\Partner\CrmController::class, 'show'])->name('crm.show');
+    Route::put('/crm/{lead}', [\App\Http\Controllers\Partner\CrmController::class, 'update'])->name('crm.update');
+    Route::put('/crm/{lead}/stage', [\App\Http\Controllers\Partner\CrmController::class, 'advance'])->name('crm.advance');
     Route::get('/clients', [$controller, 'customers'])->name('customers');
     Route::post('/clients', [$controller, 'storeCustomer'])->middleware('throttle:20,1')->name('customers.store');
     Route::put('/clients/{customer}', [$controller, 'updateCustomer'])->name('customers.update');

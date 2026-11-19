@@ -53,7 +53,7 @@ final class LeadController extends Controller
     public function show(Lead $lead): Response
     {
         $this->authorize('view', $lead);
-        $lead->load(['product:id,name,code,slug', 'assignedUser:id,name,email', 'convertedCustomer:id,uuid,customer_number,name', 'demoRequests.product:id,name', 'demoRequests.assignedUser:id,name', 'activities.actor:id,name', 'notes.author:id,name']);
+        $lead->load(['product:id,name,code,slug', 'assignedUser:id,name,email', 'partnerOwner:id,name', 'stageHistory', 'convertedCustomer:id,uuid,customer_number,name', 'demoRequests.product:id,name', 'demoRequests.assignedUser:id,name', 'activities.actor:id,name', 'notes.author:id,name']);
 
         return Inertia::render('Admin/Leads/Show', [
             'lead' => (new LeadResource($lead))->resolve(), 'statuses' => array_column(LeadStatus::cases(), 'value'),

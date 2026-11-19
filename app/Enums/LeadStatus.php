@@ -14,4 +14,19 @@ enum LeadStatus: string
     case Negotiating = 'negotiating';
     case Won = 'won';
     case Lost = 'lost';
+
+    public function next(): ?self
+    {
+        return match ($this) {
+            self::New => self::Contacted,
+            self::Contacted => self::Qualified,
+            self::Qualified => self::DemoScheduled,
+            self::DemoScheduled => self::DemoCompleted,
+            self::DemoCompleted => self::Trial,
+            self::Trial => self::QuotationSent,
+            self::QuotationSent => self::Negotiating,
+            self::Negotiating => self::Won,
+            self::Won, self::Lost => null,
+        };
+    }
 }
