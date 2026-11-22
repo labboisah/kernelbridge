@@ -5,6 +5,7 @@ namespace App\Domain\Finance\Services;
 use App\Domain\Audit\Contracts\AuditRecorder;
 use App\Domain\Licensing\Services\PaidLicenseService;
 use App\Domain\Partners\CommissionService;
+use App\Domain\Partners\PartnerClientNotifications;
 use App\Domain\Sales\Services\QuotationCalculator;
 use App\Models\Customer;
 use App\Models\Invoice;
@@ -59,9 +60,14 @@ final readonly class InvoiceManager
                 throw ValidationException::withMessages(['status' => 'Only draft invoices can be issued.']);
             }$i->update(['status' => $i->due_date->isPast() ? 'overdue' : 'issued', 'issued_at' => now()]);
             $this->audit->record('invoice.issued', $actor, ['invoice_uuid' => $i->uuid]);
+            app(PartnerClientNotifications::class)->invoice($i);
         });
         $i->load(['customer', 'items']);
-        Notification::route('mail', $i->customer->email)->notify(new InvoiceIssued($i));
+        if ($i->customer->email) {
+            Notification::route('mail', $i->customer->email)->notify(new InvoiceIssued($i));
+        } else {
+            \Illuminate\Support\Facades\Log::warning('Invoice notification not sent: customer has no email.', ['invoice_id' => $i->id]);
+        }
     }
 
     public function payment(Invoice $invoice, array $data, User $actor): void
@@ -75,11 +81,13 @@ final readonly class InvoiceManager
             $balance = $this->minor($i->balance);
             if ($amount > $balance) {
                 throw ValidationException::withMessages(['amount' => 'Payment cannot exceed the outstanding balance.']);
-            }$i->payments()->create([...$data, 'amount' => $this->format($amount), 'currency' => $i->currency, 'status' => 'successful', 'recorded_by' => $actor->id]);
+            }$invoicePayment = $i->payments()->create([...$data, 'amount' => $this->format($amount), 'currency' => $i->currency, 'status' => 'successful', 'recorded_by' => $actor->id]);
             $paid = $this->minor($i->amount_paid) + $amount;
             $remaining = $this->minor($i->total) - $paid;
             $status = $remaining === 0 ? 'paid' : 'partially_paid';
             $i->update(['amount_paid' => $this->format($paid), 'balance' => $this->format($remaining), 'status' => $status, 'paid_at' => $remaining === 0 ? now() : null, 'payment_reference' => $data['reference']]);
+            app(\App\Domain\Partners\PartnerPointsService::class)->redeemOnSuccessfulInvoicePayment($invoicePayment);
+            app(PartnerClientNotifications::class)->payment($i->customer, $invoicePayment->reference, $invoicePayment->amount, $invoicePayment->currency);
             app(PaidLicenseService::class)->complete($i, $actor);
             app(CommissionService::class)->accrue($i);
             $this->audit->record('invoice.payment_recorded', $actor, ['invoice_uuid' => $i->uuid, 'amount' => $this->format($amount), 'reference' => $data['reference']]);

@@ -2,23 +2,38 @@
 
 namespace App\Http\Controllers\Partner;
 
+use App\Domain\Audit\Contracts\AuditRecorder;
+use App\Domain\Customers\Services\CustomerManager;
 use App\Domain\Finance\Services\FlutterwavePaymentService;
 use App\Domain\Finance\Services\InvoiceManager;
 use App\Domain\Finance\Services\PaymentManager;
 use App\Domain\Licensing\Services\PackagePurchaseService;
+use App\Domain\Partners\PartnerQualificationService;
+use App\Domain\Partners\ClientInvitationService;
 use App\Domain\Subscriptions\Services\SubscriptionService;
 use App\Domain\Support\Services\SupportTicketService;
+use App\Enums\CustomerStatus;
+use App\Enums\CustomerType;
+use App\Enums\LeadStatus;
+use App\Enums\UserRole;
 use App\Http\Controllers\Controller;
 use App\Models\Customer;
 use App\Models\Invoice;
+use App\Models\Lead;
+use App\Models\LicenseActivationCode;
 use App\Models\PartnerApplication;
 use App\Models\PartnerCommission;
+use App\Models\PartnerNetworkCommission;
+use App\Models\PartnerPointEntry;
+use App\Models\BillingSetting;
 use App\Models\Payment;
 use App\Models\Plan;
 use App\Models\Product;
+use App\Models\ProspectiveCustomer;
 use App\Models\Subscription;
 use App\Models\SupportTeam;
 use App\Models\SupportTicket;
+use App\Notifications\PartnerClientRegistered;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
@@ -47,35 +62,186 @@ class PortalController extends Controller
     public function dashboard(Request $request)
     {
         abort_unless($request->user()->isPartner(), 403);
+        $approved = $request->user()->isApprovedAgent();
 
         return Inertia::render('Partner/Dashboard', [
             'applications' => PartnerApplication::where('user_id', $request->user()->id)->whereIn('type', array_keys(config('partners')))->get(),
-            'types' => config('partners'), 'canManageClients' => $request->user()->isApprovedAgent(),
+            'types' => config('partners'), 'canManageClients' => $approved,
+            'performance' => $approved ? $this->partnerPerformance($request->user()->id) : null,
         ]);
+    }
+
+    private function partnerPerformance(int $partnerId): array
+    {
+        $qualification = app(PartnerQualificationService::class)->forPartner($partnerId);
+        $stages = Lead::query()->where('partner_user_id', $partnerId)
+            ->select('status')->selectRaw('COUNT(*) as total')->groupBy('status')->pluck('total', 'status');
+        $start = now()->startOfMonth()->subMonths(5);
+        $activity = PartnerPointEntry::query()->where('partner_user_id', $partnerId)
+            ->where('status', 'earned')->where('points', '>', 0)
+            ->whereIn('event_type', ['pcr_registered', 'visit_recorded', 'consent_recorded', 'opportunity_won'])
+            ->where('created_at', '>=', $start)->where('created_at', '<', now()->startOfMonth()->addMonth())
+            ->selectRaw('DATE(created_at) as activity_date, SUM(points) as total')
+            ->groupBy('activity_date')->get()
+            ->groupBy(fn ($row) => substr($row->activity_date, 0, 7));
+
+        return [
+            'prospects' => ProspectiveCustomer::where('partner_user_id', $partnerId)->count(),
+            'leads' => (int) $stages->sum(),
+            'active_clients' => $qualification['active_clients'],
+            'qualification' => $qualification,
+            'network_policy_enabled' => BillingSetting::findOrFail(1)->partner_network_sharing_enabled,
+            'points_balance' => (int) PartnerPointEntry::where('partner_user_id', $partnerId)->where('status', 'earned')->sum('points'),
+            'personal_earnings' => PartnerCommission::where('partner_user_id', $partnerId)->where('status', 'earned')
+                ->select('currency')->selectRaw('SUM(amount) as total')->groupBy('currency')->get(),
+            'network_earnings' => PartnerNetworkCommission::where('partner_user_id', $partnerId)->whereIn('status', ['earned', 'paid'])
+                ->select('currency')->selectRaw('SUM(amount) as total')->groupBy('currency')->get(),
+            'pipeline' => collect(LeadStatus::cases())->map(fn (LeadStatus $status) => [
+                'status' => $status->value,
+                'count' => (int) $stages->get($status->value, 0),
+            ])->all(),
+            'activity' => collect(range(0, 5))->map(function (int $offset) use ($start, $activity): array {
+                $month = $start->copy()->addMonths($offset);
+
+                return ['month' => $month->format('M Y'), 'points' => (int) $activity->get($month->format('Y-m'), collect())->sum('total')];
+            })->all(),
+        ];
     }
 
     public function customers(Request $request)
     {
-        return Inertia::render('Partner/Customers', ['customers' => $this->clients($request)->latest()->paginate(20)]);
+        return Inertia::render('Partner/Customers', [
+            'customers' => $this->clients($request)
+                ->with(['products:id,name', 'contacts:id,customer_id,name,job_title,is_primary'])
+                ->latest()->paginate(20),
+            'products' => Product::published()->get(['id', 'name']),
+        ]);
     }
 
-    public function storeCustomer(Request $request)
+    public function storeCustomer(Request $request, CustomerManager $customers, AuditRecorder $audit, ClientInvitationService $invitations)
     {
         $this->clients($request);
-        $data = $request->validate(['name' => ['required', 'string', 'max:255'], 'email' => ['required', 'email', 'max:255'], 'phone' => ['nullable', 'string', 'max:30'], 'type' => ['required', Rule::in(['individual', 'organization'])]]);
-        DB::transaction(function () use ($request, $data) {
-            $customer = new Customer($data + ['status' => 'prospect', 'source' => 'partner_portal']);
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'type' => ['required', Rule::enum(CustomerType::class)],
+            'email' => ['required', 'email', 'max:255'],
+            'phone' => ['nullable', 'string', 'max:30'],
+            'contact_name' => ['nullable', 'string', 'max:180', 'required_with:contact_role'],
+            'contact_role' => ['nullable', 'string', 'max:120'],
+            'organization_type' => ['nullable', Rule::in(['school', 'university', 'healthcare', 'business', 'hospitality', 'government', 'nonprofit', 'other'])],
+            'estimated_number_of_users' => ['nullable', 'integer', 'min:1', 'max:10000000'],
+            'billing_address' => ['nullable', 'string', 'max:2000'],
+            'city' => ['nullable', 'string', 'max:120'],
+            'state' => ['nullable', 'string', 'max:120'],
+            'product_ids' => ['nullable', 'array', 'max:100'],
+            'product_ids.*' => ['integer', 'distinct', Rule::exists('products', 'id')->where('status', 'active')],
+        ]);
+        if (! empty($data['email']) && Customer::whereRaw('LOWER(email) = ?', [mb_strtolower($data['email'])])->exists()) {
+            throw ValidationException::withMessages(['email' => 'A client with this email already exists. Contact the administration team for assistance.']);
+        }
+
+        $customer = DB::transaction(function () use ($customers, $audit, $invitations, $request, $data): Customer {
+            $contactName = $data['contact_name'] ?? null;
+            $customer = $customers->create([
+                'name' => $data['name'],
+                'type' => $data['type'],
+                'email' => $data['email'] ?? null,
+                'phone' => $data['phone'] ?? null,
+                'billing_address' => $data['billing_address'] ?? null,
+                'city' => $data['city'] ?? null,
+                'state' => $data['state'] ?? null,
+                'metadata' => [
+                    'organization_type' => $data['organization_type'] ?? null,
+                    'estimated_number_of_users' => isset($data['estimated_number_of_users']) ? (int) $data['estimated_number_of_users'] : null,
+                ],
+                'product_ids' => $data['product_ids'] ?? [],
+                'contacts' => $contactName ? [[
+                    'name' => $contactName,
+                    'job_title' => $data['contact_role'] ?? null,
+                    'email' => $data['email'] ?? null,
+                    'phone' => $data['phone'] ?? null,
+                    'is_primary' => true,
+                ]] : [],
+                'status' => CustomerStatus::Active->value,
+                'source' => 'partner_direct',
+            ], $request->user());
             $customer->forceFill(['partner_user_id' => $request->user()->id])->save();
-            $customer->update(['customer_number' => sprintf('KBT-CUS-%06d', $customer->id)]);
+            $audit->record('partner.client_registered', $request->user(), ['customer_uuid' => $customer->uuid], $customer);
+            $invitations->send($customer);
+            $request->user()->notify(new PartnerClientRegistered(
+                $customer->name, route('partner.customers.subscriptions.create', $customer->uuid), true,
+            ));
+
+            return $customer;
         });
 
-        return back()->with('success', 'Client created.');
+        return redirect()->route('partner.customers.subscriptions.create', $customer->uuid)
+            ->with('success', 'Client registered successfully. Choose a subscription plan when ready.');
+    }
+
+    public function inviteCustomer(Request $request, string $customer, ClientInvitationService $invitations, AuditRecorder $audit)
+    {
+        $client = $this->client($request, $customer);
+        DB::transaction(function () use ($client, $request, $invitations, $audit): void {
+            $invitations->send($client);
+            $audit->record('partner.client_invitation_sent', $request->user(), ['customer_uuid' => $client->uuid]);
+        });
+
+        return back()->with('success', 'Client invitation queued for delivery.');
+    }
+
+    public function createCustomerSubscription(Request $request, string $customer)
+    {
+        $client = $this->client($request, $customer)->load('products:id,name');
+
+        return Inertia::render('Partner/CreateSubscription', [
+            'customer' => [
+                'uuid' => $client->uuid,
+                'name' => $client->name,
+                'interested_product_ids' => $client->products->pluck('id'),
+            ],
+            'products' => Product::published()->get(['id', 'name']),
+            'plans' => Plan::publiclyAvailable()->whereNotNull('price')
+                ->whereHas('product', fn ($query) => $query->published())
+                ->get(['uuid', 'name', 'product_id', 'price', 'currency', 'billing_cycle']),
+        ]);
+    }
+
+    public function subscriptions(Request $request)
+    {
+        return Inertia::render('Partner/Subscriptions', [
+            'subscriptions' => Subscription::whereIn('customer_id', $this->clients($request)->select('id'))
+                ->with(['customer:id,name', 'product:id,name', 'plan:id,name'])
+                ->latest()->paginate(20, ['id', 'uuid', 'customer_id', 'product_id', 'plan_id', 'subscription_number', 'status', 'starts_at', 'ends_at']),
+        ]);
+    }
+
+    public function activationCodes(Request $request)
+    {
+        $clientIds = $this->clients($request)->select('id');
+        $codes = LicenseActivationCode::whereHas('license', fn ($query) => $query->whereIn('customer_id', $clientIds))
+            ->with(['license:id,customer_id', 'license.customer:id,name', 'product:id,name'])
+            ->latest()->paginate(20, ['id', 'uuid', 'software_license_id', 'product_id', 'status', 'expires_at', 'created_at']);
+        $codes->through(fn (LicenseActivationCode $code) => [
+            'uuid' => $code->uuid,
+            'customer' => $code->license->customer->name,
+            'product' => $code->product->name,
+            'status' => $code->status === 'issued' && $code->expires_at?->isPast() ? 'expired' : $code->status,
+            'expires_at' => $code->expires_at?->toIso8601String(),
+            'created_at' => $code->created_at->toIso8601String(),
+        ]);
+
+        return Inertia::render('Partner/ActivationCodes', ['codes' => $codes]);
     }
 
     public function updateCustomer(Request $request, string $customer)
     {
         $client = $this->client($request, $customer);
-        $data = $request->validate(['name' => ['required', 'string', 'max:255'], 'email' => ['required', 'email', 'max:255'], 'phone' => ['nullable', 'string', 'max:30']]);
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'email' => ['nullable', 'email', 'max:255', 'required_without:phone'],
+            'phone' => ['nullable', 'string', 'max:30', 'required_without:email'],
+        ]);
         $client->update($data);
 
         return back()->with('success', 'Client updated.');
@@ -149,14 +315,116 @@ class PortalController extends Controller
 
     public function revenue(Request $request)
     {
-        $ids = $this->clients($request)->select('id');
+        $this->clients($request);
 
-        return Inertia::render('Partner/Revenue', [
-            'commissions' => PartnerCommission::where('partner_user_id', $request->user()->id)->with(['invoice:id,uuid,invoice_number', 'product:id,name'])->latest()->paginate(20),
-            'earnings' => PartnerCommission::where('partner_user_id', $request->user()->id)->where('status', 'earned')->select('currency')->selectRaw('SUM(amount) as total')->groupBy('currency')->get(),
-            'rates' => Product::published()->get(['name', 'partner_commission_rate']),
+        return redirect()->route('partner.commission');
+    }
+
+    public function commission(Request $request)
+    {
+        $ids = $this->clients($request)->select('id');
+        $partnerId = $request->user()->id;
+        $personalEarnings = PartnerCommission::where('partner_user_id', $partnerId)->where('status', 'earned')
+            ->select('currency')->selectRaw('SUM(amount) as total')->groupBy('currency')->get();
+        $networkEarnings = PartnerNetworkCommission::where('partner_user_id', $partnerId)->whereIn('status', ['earned', 'paid'])
+            ->select('currency')->selectRaw('SUM(amount) as total')->groupBy('currency')->get();
+        $totalEarnings = $personalEarnings->concat($networkEarnings)->groupBy('currency')->map(fn ($rows, $currency) => [
+            'currency' => $currency,
+            'total' => number_format($rows->sum(fn ($row) => (float) $row->total), 2, '.', ''),
+        ])->values();
+        $partnerCategory = PartnerApplication::query()
+            ->where('user_id', $partnerId)
+            ->where('type', 'sales_agent')
+            ->where('status', 'approved')
+            ->value('partner_category');
+
+        return Inertia::render('Partner/Commission', [
+            'commissions' => PartnerCommission::where('partner_user_id', $partnerId)->with(['invoice:id,uuid,invoice_number', 'product:id,name'])->latest()->paginate(20, ['*'], 'personal_page'),
+            ...$this->networkCommissionData($partnerId),
+            'personalEarnings' => $personalEarnings,
+            'earnings' => $personalEarnings,
+            'networkEarnings' => $networkEarnings,
+            'totalEarnings' => $totalEarnings,
+            'rates' => Product::published()->get(['name', 'partner_commission_rate', 'organization_partner_commission_rate'])->map(fn (Product $product) => [
+                'name' => $product->name,
+                'partner_commission_rate' => $partnerCategory === 'organization'
+                    ? $product->organization_partner_commission_rate
+                    : $product->partner_commission_rate,
+            ]),
             'collections' => Payment::whereIn('customer_id', clone $ids)->where('status', 'verified')->whereNotExists(fn ($q) => $q->selectRaw('1')->from('payments as refunds')->whereColumn('refunds.parent_payment_id', 'payments.id')->where('refunds.status', 'refunded'))->select('currency')->selectRaw('SUM(amount) as total')->groupBy('currency')->get(),
             'outstanding' => Invoice::whereIn('customer_id', clone $ids)->whereIn('status', ['issued', 'partially_paid', 'overdue'])->select('currency')->selectRaw('SUM(balance) as total')->groupBy('currency')->get(),
+        ]);
+    }
+
+    public function networkCommission(Request $request)
+    {
+        $this->clients($request);
+        $partnerId = $request->user()->id;
+
+        return Inertia::render('Partner/NetworkCommission', [
+            ...$this->networkCommissionData($partnerId),
+            'networkEarnings' => PartnerNetworkCommission::where('partner_user_id', $partnerId)->whereIn('status', ['earned', 'paid'])
+                ->select('currency')->selectRaw('SUM(amount) as total')->groupBy('currency')->get(),
+        ]);
+    }
+
+    private function networkCommissionData(int $partnerId): array
+    {
+        return [
+            'networkCommissions' => PartnerNetworkCommission::where('partner_user_id', $partnerId)
+                ->with('product:id,name')->latest('earned_at')
+                ->paginate(20, ['id', 'partner_user_id', 'product_id', 'partner_level', 'level_weight', 'pool_rate', 'payment_base_amount', 'platform_amount', 'pool_amount', 'amount', 'currency', 'status', 'earned_at', 'paid_at'], 'network_page'),
+            'qualification' => app(PartnerQualificationService::class)->forPartner($partnerId),
+            'networkPolicyEnabled' => BillingSetting::findOrFail(1)->partner_network_sharing_enabled,
+        ];
+    }
+
+    public function effortPoints(Request $request)
+    {
+        $this->clients($request);
+        $partnerId = $request->user()->id;
+        $events = [
+            'pcr_registered' => 'Prospects registered',
+            'visit_recorded' => 'Visits / contacts recorded',
+            'consent_recorded' => 'Consent and CRM registrations',
+            'opportunity_won' => 'CRM opportunities won',
+        ];
+        $ownTotals = PartnerPointEntry::query()->where('partner_user_id', $partnerId)
+            ->where('status', 'earned')->where('points', '>', 0)->whereIn('event_type', array_keys($events))
+            ->select('event_type')->selectRaw('SUM(points) as total')->groupBy('event_type')->pluck('total', 'event_type');
+        $otherPartnerIds = PartnerApplication::query()->where('type', 'sales_agent')->where('status', 'approved')
+            ->where('user_id', '!=', $partnerId)
+            ->whereHas('user', fn ($query) => $query->role(UserRole::Agent->value))
+            ->pluck('user_id');
+        $othersByEvent = collect();
+        $comparisonAvailable = $otherPartnerIds->count() >= 3;
+
+        if ($comparisonAvailable) {
+            $othersByEvent = PartnerPointEntry::query()->whereIn('partner_user_id', $otherPartnerIds)
+                ->where('status', 'earned')->where('points', '>', 0)->whereIn('event_type', array_keys($events))
+                ->select('event_type')->selectRaw('SUM(points) as total')->groupBy('event_type')->pluck('total', 'event_type');
+        }
+
+        $comparison = collect($events)->map(fn (string $label, string $event) => [
+            'event_type' => $event,
+            'label' => $label,
+            'your_points' => (int) $ownTotals->get($event, 0),
+            'other_average' => $comparisonAvailable ? round((float) $othersByEvent->get($event, 0) / $otherPartnerIds->count(), 1) : 0,
+        ])->values();
+
+        return Inertia::render('Partner/EffortPoints', [
+            'points' => [
+                'balance' => (int) PartnerPointEntry::query()->where('partner_user_id', $partnerId)->where('status', 'earned')->sum('points'),
+                'value' => BillingSetting::findOrFail(1)->partner_point_value,
+            ],
+            'pointBonuses' => PartnerPointEntry::query()->where('partner_user_id', $partnerId)
+                ->where('event_type', 'payment_redemption')->where('status', 'earned')
+                ->select('currency')->selectRaw('SUM(amount) as total')->groupBy('currency')->get(),
+            'pointEntries' => PartnerPointEntry::query()->where('partner_user_id', $partnerId)
+                ->with(['prospect:id,name,organization', 'lead:id,lead_number', 'payment:id,payment_number', 'invoicePayment:id,reference'])
+                ->latest()->paginate(10),
+            'comparison' => $comparison,
+            'comparisonAvailable' => $comparisonAvailable,
         ]);
     }
 

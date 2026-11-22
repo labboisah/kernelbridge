@@ -59,6 +59,7 @@ final readonly class PaymentManager
                 throw ValidationException::withMessages(['allocations' => 'The full payment amount must be allocated before verification.']);
             }
             $payment->update(['status' => PaymentStatus::Verified, 'verified_by' => $actor->id, 'verified_at' => now()]);
+            app(\App\Domain\Partners\PartnerPointsService::class)->redeemOnVerifiedPayment($payment->fresh());
             foreach ($payment->allocations()->with('invoice')->get() as $allocation) {
                 app(PaidLicenseService::class)->complete($allocation->invoice, $actor);
                 app(\App\Domain\Partners\CommissionService::class)->accrue($allocation->invoice);
@@ -92,6 +93,7 @@ final readonly class PaymentManager
             if ($payment->status !== PaymentStatus::Verified || Payment::query()->where('parent_payment_id', $payment->id)->exists()) {
                 throw ValidationException::withMessages(['status' => 'Only an unreversed verified payment can be refunded.']);
             }
+            app(\App\Domain\Partners\PartnerPointsService::class)->reverseRedemption($payment);
             foreach ($payment->allocations as $allocation) {
                 $order = SubscriptionPackageOrder::query()->where('invoice_id', $allocation->invoice_id)->first();
                 $subscriptionIds = Subscription::query()->where('invoice_id', $allocation->invoice_id)->pluck('id');

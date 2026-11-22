@@ -1,31 +1,16 @@
 <script setup>
 import PartnerLayout from '@/Layouts/PartnerLayout.vue';
 import Pagination from '@/Components/Partner/Pagination.vue';
-import FormErrors from '@/Components/Partner/FormErrors.vue';
-import { Link, useForm } from '@inertiajs/vue3';
+import { Link } from '@inertiajs/vue3';
 
 defineProps({ leads: Object, statuses: Array });
-const form = useForm({ name: '', organization: '', email: '', phone: '', location: '', follow_up_date: '' });
 const label = status => status.replaceAll('_', ' ');
-const submit = () => form.post(route('partner.crm.store'), { preserveScroll: true });
 </script>
 
 <template>
     <PartnerLayout title="CRM pipeline">
-        <p class="mb-6 text-slate-600">Create and track your opportunities through the sales pipeline. The company sales team can also manage these leads.</p>
-        <form class="form-card mb-6" @submit.prevent="submit">
-            <h2 class="text-xl font-bold">Add an opportunity</h2>
-            <FormErrors :errors="form.errors" />
-            <div class="form-grid">
-                <label>Contact name<input v-model="form.name" required maxlength="255" /></label>
-                <label>Organisation<input v-model="form.organization" maxlength="255" /></label>
-                <label>Email<input v-model="form.email" type="email" required maxlength="255" /></label>
-                <label>Phone<input v-model="form.phone" type="tel" maxlength="40" /></label>
-                <label>Location<input v-model="form.location" maxlength="255" /></label>
-                <label>Follow-up date<input v-model="form.follow_up_date" type="date" /></label>
-            </div>
-            <button class="form-button" :disabled="form.processing">Create opportunity</button>
-        </form>
+        <p class="mb-6 text-slate-600">Track interested, consenting prospects through each stage of the sales process. Register new prospects in the PCR first.</p>
+        <Link :href="route('partner.pcr.index')" class="mb-6 inline-block rounded-lg bg-[#0B3D6E] px-4 py-2.5 font-semibold text-white">Open PCR register</Link>
 
         <section aria-label="Pipeline stages">
             <h2 class="mb-2 text-xl font-bold">Your pipeline</h2>

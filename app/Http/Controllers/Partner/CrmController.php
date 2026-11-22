@@ -2,9 +2,12 @@
 
 namespace App\Http\Controllers\Partner;
 
+use App\Domain\Partners\PartnerPointsService;
 use App\Enums\LeadStatus;
+use App\Domain\Sales\Services\LeadConversionService;
 use App\Http\Controllers\Controller;
 use App\Models\Lead;
+use App\Models\Product;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -32,32 +35,17 @@ final class CrmController extends Controller
     public function show(Request $request, string $lead)
     {
         $lead = $this->leads($request)
-            ->select(['id', 'uuid', 'lead_number', 'name', 'organization', 'email', 'phone', 'location', 'follow_up_date', 'status'])
+            ->select(['id', 'uuid', 'lead_number', 'name', 'organization', 'email', 'phone', 'location', 'organization_type', 'number_of_users', 'product_id', 'follow_up_date', 'status'])
             ->where('uuid', $lead)
-            ->with('stageHistory:id,lead_id,status,entered_at')
+            ->with(['stageHistory:id,lead_id,status,entered_at', 'convertedCustomer:id,uuid,customer_number,name'])
             ->firstOrFail();
 
         return Inertia::render('Partner/Crm/Show', [
             'lead' => $lead,
             'statuses' => array_column(LeadStatus::cases(), 'value'),
             'nextStatus' => $lead->status->next()?->value,
+            'products' => Product::published()->get(['id', 'name']),
         ]);
-    }
-
-    public function store(Request $request)
-    {
-        $this->leads($request);
-        $data = $this->validatedDetails($request);
-
-        $lead = DB::transaction(function () use ($request, $data): Lead {
-            $lead = new Lead($data + ['source' => 'partner_portal', 'status' => LeadStatus::New]);
-            $lead->forceFill(['partner_user_id' => $request->user()->id])->save();
-            $lead->update(['lead_number' => sprintf('KBT-LEAD-%06d', $lead->id)]);
-
-            return $lead;
-        });
-
-        return redirect()->route('partner.crm.show', $lead->uuid)->with('success', 'CRM lead created.');
     }
 
     public function update(Request $request, string $lead)
@@ -68,32 +56,47 @@ final class CrmController extends Controller
         return back()->with('success', 'CRM lead updated.');
     }
 
-    public function advance(Request $request, string $lead)
+    public function advance(Request $request, string $lead, LeadConversionService $conversion, PartnerPointsService $points)
     {
         $query = $this->leads($request);
         $data = $request->validate(['status' => ['required', Rule::enum(LeadStatus::class)]]);
 
-        DB::transaction(function () use ($query, $lead, $data): void {
+        DB::transaction(function () use ($query, $lead, $data, $request, $conversion, $points): void {
             $record = $query->where('uuid', $lead)->lockForUpdate()->firstOrFail();
             $status = LeadStatus::from($data['status']);
             if ($record->status->next() === null || ! in_array($status, [$record->status->next(), LeadStatus::Lost], true)) {
                 throw ValidationException::withMessages(['status' => 'Choose the next stage or mark this lead as lost. Closed leads cannot be changed here.']);
             }
-            $record->update(['status' => $status]);
+            if ($status === LeadStatus::Won) {
+                $conversion->convert($record, $request->user(), $request->user()->id);
+                $points->awardWonLead($record);
+            } else {
+                $record->update(['status' => $status]);
+            }
         });
 
-        return back()->with('success', 'Pipeline stage updated.');
+        return back()->with('success', $data['status'] === LeadStatus::Won->value
+            ? 'Opportunity won and added to your clients.'
+            : 'Pipeline stage updated.');
     }
 
     private function validatedDetails(Request $request): array
     {
-        return $request->validate([
+        $data = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'organization' => ['nullable', 'string', 'max:255'],
-            'email' => ['required', 'email', 'max:255'],
+            'email' => ['nullable', 'email', 'max:255'],
             'phone' => ['nullable', 'string', 'max:40'],
             'location' => ['nullable', 'string', 'max:255'],
+            'organization_type' => ['nullable', Rule::in(['school', 'university', 'healthcare', 'business', 'hospitality', 'government', 'nonprofit', 'other'])],
+            'number_of_users' => ['nullable', 'integer', 'min:1', 'max:10000000'],
+            'product_id' => ['nullable', 'integer', Rule::exists('products', 'id')->where('status', 'active')],
             'follow_up_date' => ['nullable', 'date'],
         ]);
+        if (! empty($data['product_id']) && ! Product::published()->whereKey($data['product_id'])->exists()) {
+            throw ValidationException::withMessages(['product_id' => 'Choose a currently available product.']);
+        }
+
+        return $data;
     }
 }

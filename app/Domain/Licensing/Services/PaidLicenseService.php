@@ -3,6 +3,7 @@
 namespace App\Domain\Licensing\Services;
 
 use App\Domain\Subscriptions\Services\SubscriptionService;
+use App\Domain\Partners\PartnerClientNotifications;
 use App\Enums\InvoiceStatus;
 use App\Models\Invoice;
 use App\Models\Subscription;
@@ -34,6 +35,7 @@ final readonly class PaidLicenseService
                 $subscription = $this->subscriptions->activate($subscription, $invoice, $actor);
                 $this->licenses->issue($subscription, 1);
                 app(ClientSetupService::class)->provision($subscription, $actor);
+                app(PartnerClientNotifications::class)->installation($subscription);
             }
         });
     }

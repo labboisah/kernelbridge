@@ -3,6 +3,7 @@
 namespace App\Domain\Notifications\Services;
 
 use App\Enums\BusinessNotificationType;
+use App\Domain\Partners\PartnerClientNotifications;
 use App\Models\DemoRequest;
 use App\Models\Invoice;
 use App\Models\LicenseActivation;
@@ -43,14 +44,23 @@ final readonly class BusinessLifecycleNotifications
 
         Payment::updated(function (Payment $payment): void {
             if ($payment->wasChanged('status') && $payment->status->value === 'verified') {
-                $this->dispatch->toCustomer($payment->customer, new BusinessNotification(BusinessNotificationType::PaymentVerified, 'Payment verified', "Payment {$payment->payment_number} has been verified.", ['payment_uuid' => $payment->uuid]));
+                if ($payment->customer->partner_user_id) {
+                    app(PartnerClientNotifications::class)->payment($payment->customer, $payment->payment_number, $payment->amount, $payment->currency);
+                    $this->databaseCopy($payment->customer, BusinessNotificationType::PaymentVerified, 'Payment verified', "Payment {$payment->payment_number} has been verified.", ['payment_uuid' => $payment->uuid]);
+                } else {
+                    $this->dispatch->toCustomer($payment->customer, new BusinessNotification(BusinessNotificationType::PaymentVerified, 'Payment verified', "Payment {$payment->payment_number} has been verified.", ['payment_uuid' => $payment->uuid]));
+                }
             }
         });
 
         Subscription::updated(function (Subscription $subscription): void {
             if ($subscription->wasChanged('status') && $subscription->status->value === 'active') {
                 $subscription->loadMissing(['customer', 'product']);
-                $this->dispatch->toCustomer($subscription->customer, new BusinessNotification(BusinessNotificationType::SubscriptionActivated, 'Subscription activated', "Your {$subscription->product->name} subscription is active.", ['subscription_uuid' => $subscription->uuid]));
+                if ($subscription->customer->partner_user_id && data_get($subscription->metadata, 'checkout')) {
+                    $this->databaseCopy($subscription->customer, BusinessNotificationType::SubscriptionActivated, 'Subscription activated', "Your {$subscription->product->name} subscription is active.", ['subscription_uuid' => $subscription->uuid]);
+                } else {
+                    $this->dispatch->toCustomer($subscription->customer, new BusinessNotification(BusinessNotificationType::SubscriptionActivated, 'Subscription activated', "Your {$subscription->product->name} subscription is active.", ['subscription_uuid' => $subscription->uuid]));
+                }
             }
         });
 

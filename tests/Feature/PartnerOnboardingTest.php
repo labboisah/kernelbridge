@@ -44,20 +44,35 @@ class PartnerOnboardingTest extends TestCase
         $this->assertFalse(auth()->user()->hasRole('sales'));
     }
 
-    public function test_each_type_can_save_resume_and_submit(): void
+    public function test_each_type_can_submit_and_view_application(): void
     {
-        $user = User::factory()->create();
-        $this->actingAs($user);
         foreach (array_keys(config('partners')) as $type) {
-            $this->travel(61)->seconds();
+            $user = User::factory()->create();
             $url = route('partners.onboarding', $type);
-            $this->post($url, ['action' => 'save', 'details' => 'Draft'])->assertRedirect($url);
-            $this->get($url)->assertOk()->assertInertia(fn (Assert $p) => $p->where('application.details', 'Draft')->where('application.status', 'draft'));
-            $this->post($url, $this->submission() + ['user_id' => 999, 'status' => 'approved'])->assertRedirect($url);
+            $this->actingAs($user)->post($url, $this->submission() + ['user_id' => 999, 'status' => 'approved'])->assertRedirect($url);
             $this->assertDatabaseHas('partner_applications', ['user_id' => $user->id, 'type' => $type, 'status' => 'submitted']);
-            $this->post($url, $this->submission())->assertStatus(409);
+            $this->get($url)->assertOk()->assertInertia(fn (Assert $p) => $p
+                ->where('application.status', 'submitted')
+                ->where('readOnly', true));
+            $this->post($url, $this->submission())->assertForbidden();
         }
         $this->assertDatabaseCount('partner_applications', 3);
+    }
+
+    public function test_partner_can_only_view_saved_draft_and_cannot_start_another_application(): void
+    {
+        $user = User::factory()->create();
+        $url = route('partners.onboarding', 'developer');
+        $this->actingAs($user)->post($url, ['action' => 'save', 'details' => 'Draft'])->assertRedirect($url);
+
+        $this->get($url)->assertOk()->assertInertia(fn (Assert $p) => $p
+            ->where('application.details', 'Draft')
+            ->where('application.status', 'draft')
+            ->where('readOnly', true));
+        $this->post($url, ['action' => 'submit'] + $this->submission())->assertForbidden();
+        $this->get(route('partners.onboarding', 'sales_agent'))->assertNotFound();
+        $this->post(route('partners.onboarding', 'sales_agent'), $this->submission())->assertForbidden();
+        $this->assertDatabaseCount('partner_applications', 1);
     }
 
     public function test_submission_requires_contact_details_and_consent(): void
@@ -77,10 +92,9 @@ class PartnerOnboardingTest extends TestCase
         $this->get('/partners/administrator/register')->assertNotFound();
     }
 
-    public function test_guided_responses_resume_and_are_visible_to_applicant_and_admin_without_losing_legacy_answers(): void
+    public function test_guided_responses_are_visible_to_applicant_and_admin(): void
     {
         $user = User::factory()->create();
-        $this->actingAs($user)->post('/partners/developer/onboarding', ['action' => 'save', 'background_knowledge' => 'Existing background']);
         $answers = [
             'background_areas' => ['Healthcare', 'Software and technology'],
             'digital_skills' => ['Email and internet', 'Technical support'],
@@ -93,20 +107,20 @@ class PartnerOnboardingTest extends TestCase
             'management_experience' => null,
             'management_skills' => [],
         ];
-        $this->post('/partners/developer/onboarding', ['action' => 'save', 'guided_answers' => json_encode($answers, JSON_THROW_ON_ERROR)])->assertRedirect();
+        $this->actingAs($user)->post('/partners/developer/onboarding', $this->submission() + [
+            'background_knowledge' => 'Existing background',
+            'guided_answers' => json_encode($answers, JSON_THROW_ON_ERROR),
+        ])->assertRedirect();
         $application = PartnerApplication::firstOrFail();
         $this->assertSame($answers, $application->guided_answers);
         $this->assertSame('Existing background', $application->background_knowledge);
         $this->get('/partners/developer/onboarding')->assertInertia(fn (Assert $p) => $p
+            ->where('readOnly', true)
             ->where('application.guided_answers.installation_experience', 'Yes')
             ->where('application.guided_answers.networking_experience', 'No')
             ->where('application.guided_answers.digital_skills', ['Email and internet', 'Technical support'])
             ->where('questionnaire.0.questions.2.type', 'single'));
-
-        $answers['digital_skills'] = [];
-        $this->post('/partners/developer/onboarding', $this->submission() + ['guided_answers' => json_encode($answers, JSON_THROW_ON_ERROR)])->assertRedirect();
-        $this->assertSame([], $application->fresh()->guided_answers['digital_skills']);
-        $this->get('/partners/developer/onboarding')->assertInertia(fn (Assert $p) => $p->where('application.background_knowledge', 'Existing background')->where('application.guided_answers.experience_level', 'Intermediate'));
+        $this->post('/partners/developer/onboarding', ['action' => 'save'])->assertForbidden();
 
         $admin = User::factory()->create();
         $admin->assignRole('admin');
@@ -215,7 +229,10 @@ class PartnerOnboardingTest extends TestCase
     {
         Storage::fake('local');
         $user = User::factory()->create();
-        $photo = UploadedFile::fake()->image('photo.jpg');
+        $photo = UploadedFile::fake()->createWithContent(
+            'photo.png',
+            base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lE8AAAAASUVORK5CYII='),
+        );
         $this->actingAs($user)->post('/partners/developer/onboarding', [
             'action' => 'save', 'background_knowledge' => 'Healthcare software', 'digital_skills' => 'Word processing',
             'installation_experience' => 'Workstation setup', 'networking_experience' => 'LAN', 'business_skills' => 'Sales',
@@ -224,19 +241,19 @@ class PartnerOnboardingTest extends TestCase
         $application = PartnerApplication::firstOrFail();
         Storage::disk('local')->assertExists($application->photo_path);
         $this->get('/partners/developer/onboarding')->assertInertia(fn (Assert $p) => $p
+            ->where('readOnly', true)
             ->where('application.background_knowledge', 'Healthcare software')
             ->where('application.management_skills', 'Team leadership')
             ->where('application.has_photo', true)
             ->missing('application.photo_path'));
         $this->get(route('partners.photo', $application))->assertOk()->assertHeader('Cache-Control', 'no-store, private');
+        $this->get('/partner')->assertInertia(fn (Assert $p) => $p
+            ->where('auth.partner_photo_url', route('partners.photo', $application)));
         $this->actingAs(User::factory()->create())->get(route('partners.photo', $application))->assertForbidden();
         $admin = User::factory()->create();
         $admin->assignRole('admin');
         $this->actingAs($admin)->get(route('partners.photo', $application))->assertOk();
-        $this->actingAs($user)->post('/partners/developer/onboarding', ['action' => 'save', 'photo' => UploadedFile::fake()->create('bad.pdf', 20, 'application/pdf')])->assertSessionHasErrors('photo');
-        $oldPhoto = $application->photo_path;
-        $this->post('/partners/developer/onboarding', ['action' => 'save', 'photo' => UploadedFile::fake()->image('replacement.png')])->assertRedirect();
-        Storage::disk('local')->assertMissing($oldPhoto);
+        $this->actingAs($user)->post('/partners/developer/onboarding', ['action' => 'save', 'photo' => UploadedFile::fake()->create('bad.pdf', 20, 'application/pdf')])->assertForbidden();
         Storage::disk('local')->assertExists($application->fresh()->photo_path);
     }
 }

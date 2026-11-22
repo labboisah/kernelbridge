@@ -5,7 +5,7 @@ import PartnerAnswers from '@/Components/PartnerAnswers.vue';
 import { Head, Link, useForm } from '@inertiajs/vue3';
 import { ref } from 'vue';
 
-const props = defineProps({ type: String, category: Object, application: Object, questionnaire: Array });
+const props = defineProps({ type: String, category: Object, application: Object, questionnaire: Array, readOnly: Boolean });
 const contact = [
     {key:'organisation', label:'Organisation (optional)', type:'text', max:255},
     {key:'phone', label:'Contact phone', type:'tel', max:30},
@@ -52,13 +52,12 @@ const submit = action => {
 <Head :title="category.label + ' onboarding'"/><PublicLayout>
     <section class="page-hero"><div class="page-shell"><p class="section-label !text-teal-300">Partner onboarding</p><h1 class="page-title">{{ category.label }}</h1><p class="page-intro">{{ category.description }}</p></div></section>
     <section class="page-shell grid gap-10 py-14 lg:grid-cols-[.7fr_1.3fr]">
-        <aside><h2 class="text-2xl font-bold">Your application</h2><ol class="mt-6 space-y-4 text-slate-600"><li>1. Contact details</li><li v-for="(section, index) in questionnaire" :key="section.title">{{ index + 2 }}. {{ section.title }}</li><li>{{ finalStep + 1 }}. Interests, photo and consent</li></ol><p class="mt-8 text-sm">Save a draft to continue later. Your details will be used to review your application.</p><Link :href="route('partners.index')" class="mt-6 block font-bold text-[#0B3D6E]">View all partner types</Link><Link :href="route('partner.dashboard')" class="mt-4 block font-bold text-[#0B3D6E]">Partner portal</Link></aside>
+        <aside><h2 class="text-2xl font-bold">Your application</h2><ol class="mt-6 space-y-4 text-slate-600"><li>1. Contact details</li><li v-for="(section, index) in questionnaire" :key="section.title">{{ index + 2 }}. {{ section.title }}</li><li>{{ finalStep + 1 }}. Interests, photo and consent</li></ol><p class="mt-8 text-sm">{{ readOnly ? 'Your saved application is view-only. Contact our team if you need to make changes.' : 'Save a draft to continue later. Your details will be used to review your application.' }}</p><Link v-if="!readOnly" :href="route('partners.index')" class="mt-6 block font-bold text-[#0B3D6E]">View all partner types</Link><Link :href="route('partner.dashboard')" class="mt-4 block font-bold text-[#0B3D6E]">Partner portal</Link></aside>
         <div>
             <p v-if="$page.props.flash.success" role="status" class="success-message mb-5">{{ $page.props.flash.success }}</p>
-            <div v-if="application && application.status !== 'draft'" class="form-card">
-                <h2 class="text-2xl font-bold">Application {{ application.status }}</h2><p class="mt-3 text-slate-600">{{ application.status === 'submitted' ? 'Your application is awaiting review. Check this page for updates.' : 'Your application has been reviewed. Read the next steps below.' }}</p>
+            <div v-if="application && (readOnly || application.status !== 'draft')" class="form-card">
+                <h2 class="text-2xl font-bold">Application {{ application.status }}</h2><p class="mt-3 text-slate-600">{{ application.status === 'draft' ? 'Your application is saved as a draft and is view-only in the partner portal.' : application.status === 'submitted' ? 'Your application is awaiting review. Check this page for updates.' : 'Your application has been reviewed. Read the next steps below.' }}</p>
                 <p v-if="application.review_note" class="mt-5 whitespace-pre-line rounded-xl bg-slate-50 p-4">{{ application.review_note }}</p>
-                <Link v-if="application.status === 'approved'" :href="route('partner.bank.edit')" class="font-bold text-cyan-700">Continue to bank details</Link>
                 <img v-if="application.has_photo" :src="route('partners.photo', application.id)" alt="Your application photo" class="h-32 w-32 object-cover"/>
                 <dl class="mt-6 space-y-4"><div v-for="field in contact" :key="field.key"><dt class="font-bold">{{ field.label }}</dt><dd class="whitespace-pre-line">{{ application[field.key] || 'Not provided' }}</dd></div><div v-for="field in experience.filter(field => application[field.key])" :key="field.key"><dt class="font-bold">{{ field.label }} (previous response)</dt><dd class="whitespace-pre-line">{{ application[field.key] }}</dd></div><div><dt class="font-bold">Your interests</dt><dd class="whitespace-pre-line">{{ application.details }}</dd></div></dl>
                 <PartnerAnswers class="mt-6" :questionnaire="questionnaire" :answers="application.guided_answers"/>

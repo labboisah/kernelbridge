@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Domain\Audit\Contracts\AuditRecorder;
+use App\Domain\Partners\PartnerPointsService;
 use App\Domain\Sales\Services\LeadConversionService;
 use App\Enums\LeadStatus;
 use App\Enums\UserRole;
@@ -61,11 +62,18 @@ final class LeadController extends Controller
         ]);
     }
 
-    public function update(UpdateLeadRequest $request, Lead $lead, AuditRecorder $audit): RedirectResponse
+    public function update(UpdateLeadRequest $request, Lead $lead, AuditRecorder $audit, LeadConversionService $conversion, PartnerPointsService $points): RedirectResponse
     {
-        DB::transaction(function () use ($request, $lead, $audit): void {
+        DB::transaction(function () use ($request, $lead, $audit, $conversion, $points): void {
+            $wasWon = $lead->status === LeadStatus::Won;
             $before = $lead->only(['status', 'assigned_to', 'follow_up_date', 'product_id']);
             $lead->update($request->validated());
+            if ($lead->partner_user_id && $lead->status === LeadStatus::Won) {
+                $conversion->convert($lead, $request->user(), $lead->partner_user_id);
+                if (! $wasWon) {
+                    $points->awardWonLead($lead);
+                }
+            }
             $lead->activities()->create(['actor_id' => $request->user()->id, 'type' => 'lead_updated', 'description' => 'Lead pipeline details updated.', 'metadata' => ['before' => $before, 'after' => $lead->only(array_keys($before))]]);
             $audit->record('lead.updated', $request->user(), ['lead_uuid' => $lead->uuid, 'before' => $before, 'after' => $lead->only(array_keys($before))]);
         });
@@ -105,7 +113,7 @@ final class LeadController extends Controller
     public function convert(Lead $lead, LeadConversionService $conversion): RedirectResponse
     {
         $this->authorize('convert', $lead);
-        $customer = $conversion->convert($lead, request()->user());
+        $customer = $conversion->convert($lead, request()->user(), $lead->partner_user_id);
 
         return redirect()->route('admin.customers.show', $customer)->with('success', 'Lead converted to customer successfully.');
     }

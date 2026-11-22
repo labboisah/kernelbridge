@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Models\PartnerApplication;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
 
@@ -33,8 +34,30 @@ class HandleInertiaRequests extends Middleware
             ...parent::share($request),
             'auth' => [
                 'user' => $request->user(),
+                'partner_photo_url' => function () use ($request): ?string {
+                    if (! $request->user()) {
+                        return null;
+                    }
+                    $application = PartnerApplication::query()->where('user_id', $request->user()->id)
+                        ->whereNotNull('photo_path')->latest('updated_at')->orderByDesc('id')->first(['id']);
+
+                    return $application ? route('partners.photo', $application) : null;
+                },
                 'is_partner' => fn (): bool => $request->user()?->isPartner() ?? false,
                 'approved_agent' => fn (): bool => $request->user()?->isApprovedAgent() ?? false,
+                'partner_category' => fn (): ?string => $request->user()?->isApprovedAgent()
+                    ? PartnerApplication::where('user_id', $request->user()->id)->where('type', 'sales_agent')->value('partner_category')
+                    : null,
+                'partner_applications' => fn (): array => $request->user()?->isPartner()
+                    ? PartnerApplication::where('user_id', $request->user()->id)
+                        ->get(['type', 'status'])
+                        ->map(fn (PartnerApplication $application): array => [
+                            'type' => $application->type,
+                            'label' => config("partners.{$application->type}.label"),
+                            'status' => $application->status,
+                        ])
+                        ->all()
+                    : [],
                 'roles' => fn (): array => $request->user()?->getRoleNames()->all() ?? [],
                 'permissions' => fn (): array => $request->user()?->getAllPermissions()->pluck('name')->all() ?? [],
             ],

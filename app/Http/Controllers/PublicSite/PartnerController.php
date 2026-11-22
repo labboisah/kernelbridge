@@ -43,6 +43,9 @@ class PartnerController extends Controller
     public function edit(Request $request, string $type)
     {
         $application = PartnerApplication::where('user_id', $request->user()->id)->where('type', $type)->first();
+        $readOnly = $request->user()->isPartner();
+        abort_unless(! $readOnly || $application, 404);
+
         if ($application) {
             $application->setAttribute('has_photo', $application->photo_path !== null);
         }
@@ -50,6 +53,7 @@ class PartnerController extends Controller
         return Inertia::render('Public/PartnerOnboarding', [
             'type' => $type, 'category' => $this->category($type),
             'application' => $application, 'questionnaire' => config('partner_questionnaire'),
+            'readOnly' => $readOnly,
         ]);
     }
 
@@ -68,6 +72,8 @@ class PartnerController extends Controller
     public function save(Request $request, string $type)
     {
         $this->category($type);
+        abort_unless(! $request->user()->isPartner(), 403, 'Partner applications can only be viewed after they are saved.');
+
         $submit = $request->input('action') === 'submit';
         $guidedAnswers = null;
         if ($request->has('guided_answers')) {

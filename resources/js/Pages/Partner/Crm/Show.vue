@@ -3,13 +3,16 @@ import PartnerLayout from '@/Layouts/PartnerLayout.vue';
 import FormErrors from '@/Components/Partner/FormErrors.vue';
 import { Link, useForm } from '@inertiajs/vue3';
 
-const props = defineProps({ lead: Object, statuses: Array, nextStatus: String });
+const props = defineProps({ lead: Object, statuses: Array, nextStatus: String, products: Array });
 const details = useForm({
     name: props.lead.name,
     organization: props.lead.organization || '',
     email: props.lead.email,
     phone: props.lead.phone || '',
     location: props.lead.location || '',
+    organization_type: props.lead.organization_type || '',
+    number_of_users: props.lead.number_of_users || '',
+    product_id: props.lead.product_id || '',
     follow_up_date: props.lead.follow_up_date ? props.lead.follow_up_date.slice(0, 10) : '',
 });
 const stage = useForm({ status: '' });
@@ -38,7 +41,10 @@ const advance = status => {
                         <button type="button" class="rounded-lg border border-red-300 px-4 py-2 font-bold text-red-700" :disabled="stage.processing" @click="advance('lost')">Mark lost</button>
                     </div>
                     <p v-else class="mt-4 text-sm text-slate-600">This opportunity is closed. Contact the sales team if it needs to be reopened.</p>
-                    <p class="mt-3 text-sm text-slate-600">Marking an opportunity won does not automatically create a customer.</p>
+                    <div v-if="lead.converted_customer" class="mt-5 rounded-lg bg-emerald-50 p-4 text-emerald-900">
+                        <p class="font-semibold">Added to your clients as {{ lead.converted_customer.customer_number }}.</p>
+                        <Link :href="route('partner.customers')" class="mt-2 inline-block font-bold underline">View clients</Link>
+                    </div>
                 </section>
                 <section class="rounded-2xl bg-white p-6">
                     <h2 class="text-xl font-bold">Stage history</h2>
@@ -57,9 +63,12 @@ const advance = status => {
                 <div class="space-y-4">
                     <label>Contact name<input v-model="details.name" required maxlength="255" /></label>
                     <label>Organisation<input v-model="details.organization" maxlength="255" /></label>
-                    <label>Email<input v-model="details.email" type="email" required maxlength="255" /></label>
+                    <label>Email<input v-model="details.email" type="email" maxlength="255" /></label>
                     <label>Phone<input v-model="details.phone" type="tel" maxlength="40" /></label>
                     <label>Location<input v-model="details.location" maxlength="255" /></label>
+                    <label>Organisation type<input v-model="details.organization_type" maxlength="100" /></label>
+                    <label>Estimated users<input v-model="details.number_of_users" type="number" min="1" max="10000000" /></label>
+                    <label v-if="products.length">Product of interest<select v-model="details.product_id"><option value="">Not decided</option><option v-for="product in products" :key="product.id" :value="product.id">{{ product.name }}</option></select></label>
                     <label>Follow-up date<input v-model="details.follow_up_date" type="date" /></label>
                 </div>
                 <button class="form-button mt-4" :disabled="details.processing">Save details</button>

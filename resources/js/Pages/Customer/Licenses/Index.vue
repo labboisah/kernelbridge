@@ -79,6 +79,7 @@ const copy = async key => { try { await navigator.clipboard.writeText(key); } ca
                     <div><p class="text-sm font-bold text-cyan-700">{{ license.identifier }}</p><h3 class="mt-1 text-xl font-bold">{{ license.product }}</h3><p class="mt-1 text-sm">{{ license.packages?.join(' + ') }}</p><p class="mt-1 text-sm text-slate-500">Expires {{ license.expires_at || 'with subscription' }} - {{ license.device_bound ? 'Bound to one computer' : 'Maximum ' + license.max_activations + ' activation(s)' }}</p></div>
                     <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold uppercase">{{ license.status }}</span>
                 </div>
+                <Link v-if="license.guide_url" :href="license.guide_url" class="mt-4 inline-block font-bold text-cyan-700">View installation guide</Link>
                 <div v-if="['direct', 'hybrid'].includes(license.licensing_mode)" class="mt-5 rounded-xl border border-cyan-200 bg-cyan-50 p-4">
                     <p class="text-sm text-cyan-900">Issue one activation code for each installation. Codes expire after 24 hours and reserve a seat while unused.</p>
                     <button v-if="license.status === 'active'" type="button" class="mt-3 rounded-lg bg-cyan-700 px-4 py-2 text-sm font-bold text-white" @click="issueActivationCode(license)">Generate installation code</button>

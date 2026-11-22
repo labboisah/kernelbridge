@@ -278,7 +278,8 @@ final class PortalController extends Controller
     {
         $licenses = SoftwareLicense::query()->whereIn('customer_id', $this->customerIds($request))
             ->with([
-                'subscription.product:id,name,code,licensing_mode',
+                'subscription.product:id,name,code,licensing_mode,installation_guide_markdown',
+                'subscription.invoice:id,status',
                 'activations' => fn ($query) => $query->latest('activated_at'),
                 'activationCodes' => fn ($query) => $query->latest(),
                 'installations' => fn ($query) => $query->latest('activated_at'),
@@ -358,6 +359,7 @@ final class PortalController extends Controller
             'packages' => data_get($license->subscription?->metadata, 'package_names', []),
             'device_bound' => (bool) data_get($license->subscription?->metadata, 'device_bound', false),
             'setup_url' => $license->subscription && ClientSetupBundle::where('subscription_id', $license->subscription->id)->exists() ? route('portal.services.environment', $license->subscription) : null,
+            'guide_url' => $license->subscription?->invoice?->status->value === 'paid' && filled($license->subscription->product?->installation_guide_markdown) ? route('portal.services.installation-guide', $license->subscription) : null,
             'status' => $license->status, 'product' => $license->subscription?->product?->name,
             'expires_at' => $license->expires_at?->toDateString(), 'max_activations' => $license->max_activations,
             'activation_codes' => $license->activationCodes->map(fn ($code) => [

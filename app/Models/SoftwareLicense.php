@@ -32,6 +32,11 @@ final class SoftwareLicense extends Model
         return $this->belongsTo(Subscription::class);
     }
 
+    public function customer(): BelongsTo
+    {
+        return $this->belongsTo(Customer::class);
+    }
+
     public function product(): BelongsTo
     {
         return $this->belongsTo(Product::class);
