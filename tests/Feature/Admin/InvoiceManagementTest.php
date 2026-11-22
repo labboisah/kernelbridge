@@ -11,8 +11,12 @@ use App\Notifications\InvoiceIssued;
 use Database\Seeders\ProductSeeder;
 use Database\Seeders\RoleAndPermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
+use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
 
 final class InvoiceManagementTest extends TestCase
@@ -85,6 +89,24 @@ final class InvoiceManagementTest extends TestCase
         $invoice = Invoice::query()->firstOrFail();
         $this->get(route('invoices.customer.show', $invoice))->assertForbidden();
         $this->get(URL::temporarySignedRoute('invoices.customer.show', now()->addHour(), ['invoice' => $invoice]))->assertOk();
+    }
+
+    public function test_invoice_views_include_shared_company_images(): void
+    {
+        Storage::fake('local');
+        $path = UploadedFile::fake()->image('stamp.png')->store('document-assets', 'local');
+        DB::table('document_assets')->where('id', 1)->update(['stamp_path' => $path]);
+        $image = 'data:image/png;base64,'.base64_encode(Storage::disk('local')->get($path));
+        $this->actingAs($this->admin())->post(route('admin.invoices.store'), $this->payload())->assertRedirect();
+        $invoice = Invoice::firstOrFail();
+        $this->get(route('admin.invoices.show', $invoice))->assertInertia(fn (Assert $page) => $page->where('documentAssets.stamp', $image));
+        $this->get(URL::temporarySignedRoute('invoices.customer.show', now()->addHour(), ['invoice' => $invoice]))
+            ->assertInertia(fn (Assert $page) => $page->where('documentAssets.stamp', $image));
+        $customerUser = User::factory()->create();
+        $customerUser->assignRole('customer');
+        $invoice->customer->users()->attach($customerUser);
+        $this->actingAs($customerUser)->get(route('portal.invoices.show', $invoice))
+            ->assertInertia(fn (Assert $page) => $page->where('documentAssets.stamp', $image));
     }
 
     private function admin(): User

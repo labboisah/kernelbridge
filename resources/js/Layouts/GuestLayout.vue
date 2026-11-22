@@ -4,7 +4,7 @@ import { Link } from '@inertiajs/vue3';
 
 <template>
     <div
-        class="flex min-h-screen flex-col items-center bg-[#F8FAFC] px-4 pt-8 sm:justify-center sm:pt-0"
+        class="account-inputs flex min-h-screen flex-col items-center bg-[#F8FAFC] px-4 pt-8 sm:justify-center sm:pt-0"
     >
         <div
             class="w-full overflow-hidden border border-slate-200 bg-white px-6 py-6 shadow-lg sm:max-w-md sm:rounded-2xl"

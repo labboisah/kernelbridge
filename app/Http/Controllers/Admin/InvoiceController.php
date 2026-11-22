@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Domain\Documents\DocumentAssets;
 use App\Domain\Finance\Services\InvoiceManager;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StoreInvoicePaymentRequest;
@@ -38,12 +39,12 @@ final class InvoiceController extends Controller
         return redirect()->route('admin.invoices.show', $i)->with('success', 'Invoice created.');
     }
 
-    public function show(Invoice $invoice): Response
+    public function show(Invoice $invoice, DocumentAssets $assets): Response
     {
         $this->authorize('view', $invoice);
         $invoice->load(['customer', 'items', 'payments.recorder:id,name', 'quotation:id,uuid,quotation_number']);
 
-        return Inertia::render('Admin/Invoices/Show', ['invoice' => $invoice, 'timeline' => $this->timeline($invoice)]);
+        return Inertia::render('Admin/Invoices/Show', ['invoice' => $invoice, 'timeline' => $this->timeline($invoice), 'documentAssets' => $assets->images()]);
     }
 
     public function edit(Invoice $invoice): Response

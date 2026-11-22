@@ -1,6 +1,7 @@
 <script setup>
+import DocumentMarks from '@/Components/DocumentMarks.vue';
 import { Head, Link, router } from '@inertiajs/vue3';
-const props = defineProps({ clientSetup: { type: Object, default: null }, availableCredit: { type: String, default: '0.00' }, invoice: Object, canPayOnline: { type: Boolean, default: false }, portal: { type: Boolean, default: false } });
+const props = defineProps({ clientSetup: { type: Object, default: null }, availableCredit: { type: String, default: '0.00' }, invoice: Object, documentAssets: Object, canPayOnline: { type: Boolean, default: false }, portal: { type: Boolean, default: false } });
 const pay = () => router.post(route('portal.invoices.pay-online', props.invoice.uuid));
 </script>
 <template>
@@ -62,6 +63,7 @@ const pay = () => router.post(route('portal.invoices.pay-online', props.invoice.
             </div>
             <div v-if="invoice.notes" class="mt-10 border-t pt-6"><h3 class="font-bold">Notes</h3><p class="whitespace-pre-line">{{ invoice.notes }}</p></div>
             <div v-if="invoice.terms" class="mt-6"><h3 class="font-bold">Terms</h3><p class="whitespace-pre-line text-sm">{{ invoice.terms }}</p></div>
+            <DocumentMarks :assets="documentAssets" />
             <p class="mt-12 text-center text-sm text-slate-500">Thank you for choosing KernelBridge Technologies.</p>
         </article>
     </main>

@@ -62,7 +62,7 @@ const submit = action => {
                 <dl class="mt-6 space-y-4"><div v-for="field in contact" :key="field.key"><dt class="font-bold">{{ field.label }}</dt><dd class="whitespace-pre-line">{{ application[field.key] || 'Not provided' }}</dd></div><div v-for="field in experience.filter(field => application[field.key])" :key="field.key"><dt class="font-bold">{{ field.label }} (previous response)</dt><dd class="whitespace-pre-line">{{ application[field.key] }}</dd></div><div><dt class="font-bold">Your interests</dt><dd class="whitespace-pre-line">{{ application.details }}</dd></div></dl>
                 <PartnerAnswers class="mt-6" :questionnaire="questionnaire" :answers="application.guided_answers"/>
             </div>
-            <form v-else class="form-card" @submit.prevent="submit('submit')">
+            <form v-else class="form-card account-inputs" @submit.prevent="submit('submit')">
                 <p class="text-sm font-bold text-cyan-700">Section {{ step + 1 }} of {{ finalStep + 1 }}</p>
                 <div v-show="step === 0"><h2 class="text-2xl font-bold">Contact details</h2><div class="form-grid"><label v-for="field in contact" :key="field.key" :for="field.key">{{ field.label }}<input :id="field.key" v-model="form[field.key]" :type="field.type" :maxlength="field.max"/><InputError :message="form.errors[field.key]"/></label></div></div>
                 <section v-for="(section, index) in questionnaire" v-show="step === index + 1" :key="section.title" class="space-y-5">

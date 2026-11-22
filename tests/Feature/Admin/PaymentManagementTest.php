@@ -10,6 +10,10 @@ use App\Models\Payment;
 use App\Models\User;
 use Database\Seeders\RoleAndPermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
+use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
 
 final class PaymentManagementTest extends TestCase
@@ -78,6 +82,28 @@ final class PaymentManagementTest extends TestCase
         $log = FinancialAuditLog::query()->firstOrFail();
         $this->expectException(\LogicException::class);
         $log->update(['event' => 'tampered']);
+    }
+
+    public function test_receipt_requires_verified_unreversed_payment_and_includes_company_images(): void
+    {
+        Storage::fake('local');
+        $path = UploadedFile::fake()->image('signature.png')->store('document-assets', 'local');
+        DB::table('document_assets')->where('id', 1)->update(['signature_path' => $path]);
+        $finance = $this->finance();
+        $invoice = $this->invoice();
+        $this->actingAs($finance)->post(route('admin.payments.store'), $this->payload());
+        $payment = Payment::firstOrFail();
+        $this->get(route('admin.payments.receipt', $payment))->assertNotFound();
+        $this->post(route('admin.payments.verify', $payment), ['allocations' => [['invoice_id' => $invoice->id, 'amount' => '400.00']]])->assertSessionHasNoErrors();
+        $this->get(route('admin.payments.receipt', $payment))->assertOk()->assertInertia(fn (Assert $page) => $page
+            ->component('Admin/Payments/Receipt')
+            ->where('payment.payment_number', $payment->payment_number)
+            ->where('documentAssets.signature', 'data:image/png;base64,'.base64_encode(Storage::disk('local')->get($path))));
+        $other = User::factory()->create();
+        $other->assignRole('partner');
+        $this->actingAs($other)->get(route('admin.payments.receipt', $payment))->assertForbidden();
+        $this->actingAs($finance)->post(route('admin.payments.refund', $payment), ['reason' => 'Bank reversal'])->assertSessionHasNoErrors();
+        $this->get(route('admin.payments.receipt', $payment))->assertNotFound();
     }
 
     private function finance(): User

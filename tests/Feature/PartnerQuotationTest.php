@@ -13,6 +13,9 @@ use App\Models\ProspectiveCustomer;
 use App\Models\User;
 use Database\Seeders\RoleAndPermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Inertia\Testing\AssertableInertia as Assert;
 use Symfony\Component\Process\ExecutableFinder;
 use Symfony\Component\Process\Process;
@@ -141,6 +144,19 @@ class PartnerQuotationTest extends TestCase
         $this->assertStringContainsString('User management', $html);
         $this->assertStringNotContainsString('Hidden finance feature', $html);
         $this->assertStringNotContainsString('Disabled report', $html);
+    }
+
+    public function test_partner_quotation_pdf_embeds_shared_document_images(): void
+    {
+        Storage::fake('local');
+        $stamp = UploadedFile::fake()->image('stamp.png', 30, 30)->store('document-assets', 'local');
+        $signature = UploadedFile::fake()->image('signature.png', 60, 20)->store('document-assets', 'local');
+        DB::table('document_assets')->where('id', 1)->update(['stamp_path' => $stamp, 'signature_path' => $signature]);
+        $partner = $this->agent();
+        $plan = Plan::factory()->create(['product_id' => Product::factory()->create(['status' => 'active'])->id]);
+        $this->actingAs($partner)->post('/partner/quotations', $this->input($plan))->assertSessionHasNoErrors();
+        $response = $this->get(route('partner.quotations.pdf', PartnerQuotation::firstOrFail()->uuid))->assertOk()->assertHeader('Content-Type', 'application/pdf');
+        $this->assertGreaterThanOrEqual(2, substr_count($response->getContent(), '/Subtype /Image'));
     }
 
     public function test_earlier_quotations_do_not_claim_current_plan_contents_or_show_notes(): void

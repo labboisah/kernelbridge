@@ -116,6 +116,9 @@ Route::middleware('signed')->group(function (): void {
 
 Route::middleware(['auth', 'verified'])->group(function (): void {
     Route::get('/dashboard', CustomerDashboardController::class)->name('dashboard');
+    Route::get('/notifications', [\App\Http\Controllers\NotificationInboxController::class, 'index'])->name('notifications.index');
+    Route::put('/notifications/read-all', [\App\Http\Controllers\NotificationInboxController::class, 'readAll'])->name('notifications.read-all');
+    Route::put('/notifications/{notification}/read', [\App\Http\Controllers\NotificationInboxController::class, 'read'])->name('notifications.read');
     Route::get('/staff', StaffDashboardController::class)->middleware('role:sales|finance|support')->name('staff.dashboard');
     Route::prefix('account')->name('portal.')->group(function (): void {
         Route::get('/checkout', [CheckoutController::class, 'show'])->name('checkout.show');
@@ -160,6 +163,13 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
     Route::post('/support/{ticket:uuid}/messages', [CustomerSupportTicketController::class, 'message'])->name('support.messages.store');
     Route::get('/support-attachments/{attachment:uuid}', SupportAttachmentController::class)->name('support.attachments.show');
     Route::prefix('admin')->name('admin.')->middleware(['role:'.implode('|', UserRole::administrative()), 'throttle:120,1'])->group(function (): void {
+        Route::get('/notifications', [\App\Http\Controllers\Admin\NotificationController::class, 'index'])->middleware('role:super_admin|admin')->name('notifications.index');
+        Route::get('/notifications/recipients', [\App\Http\Controllers\Admin\NotificationController::class, 'recipients'])->middleware('role:super_admin|admin')->name('notifications.recipients');
+        Route::get('/notifications/role-recipients', [\App\Http\Controllers\Admin\NotificationController::class, 'roleRecipients'])->middleware('role:super_admin|admin')->name('notifications.role-recipients');
+        Route::post('/notifications', [\App\Http\Controllers\Admin\NotificationController::class, 'store'])->middleware(['role:super_admin|admin', 'throttle:10,1'])->name('notifications.store');
+        Route::post('/notification-templates', [\App\Http\Controllers\Admin\NotificationController::class, 'storeTemplate'])->middleware('role:super_admin|admin')->name('notification-templates.store');
+        Route::put('/notification-templates/{template}', [\App\Http\Controllers\Admin\NotificationController::class, 'updateTemplate'])->middleware('role:super_admin|admin')->name('notification-templates.update');
+        Route::delete('/notification-templates/{template}', [\App\Http\Controllers\Admin\NotificationController::class, 'destroyTemplate'])->middleware('role:super_admin|admin')->name('notification-templates.destroy');
         Route::get('/partner-commissions', [\App\Http\Controllers\Admin\PartnerCommissionController::class, 'index'])->middleware('role:super_admin|admin')->name('partners.commissions');
         Route::put('/partner-commissions/{product:slug}', [\App\Http\Controllers\Admin\PartnerCommissionController::class, 'update'])->middleware('role:super_admin|admin')->name('partners.commissions.update');
         Route::put('/partner-point-value', [\App\Http\Controllers\Admin\PartnerCommissionController::class, 'updatePointValue'])->middleware('role:super_admin|admin')->name('partners.point-value.update');
@@ -198,6 +208,7 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
         Route::post('/payments/{payment:uuid}/verify', [AdminPaymentController::class, 'verify'])->name('payments.verify');
         Route::post('/payments/{payment:uuid}/reject', [AdminPaymentController::class, 'reject'])->name('payments.reject');
         Route::post('/payments/{payment:uuid}/refund', [AdminPaymentController::class, 'refund'])->name('payments.refund');
+        Route::get('/payments/{payment:uuid}/receipt', [AdminPaymentController::class, 'receipt'])->name('payments.receipt');
         Route::resource('payments', AdminPaymentController::class)->only(['index', 'create', 'store', 'show']);
         Route::post('/invoices/{invoice:uuid}/issue', [AdminInvoiceController::class, 'issue'])->name('invoices.issue');
         Route::post('/invoices/{invoice:uuid}/payments', [AdminInvoiceController::class, 'payment'])->name('invoices.payments.store');
@@ -230,6 +241,10 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
 
 Route::middleware('auth')->group(function () {
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
+    Route::get('/profile/photo', [ProfileController::class, 'photo'])->name('profile.photo');
+    Route::post('/profile/photo', [ProfileController::class, 'updatePhoto'])->middleware('throttle:10,1')->name('profile.photo.update');
+    Route::post('/profile/document-assets/{kind}', [\App\Http\Controllers\DocumentAssetController::class, 'update'])->whereIn('kind', ['stamp', 'signature'])->middleware('throttle:10,1')->name('profile.document-assets.update');
+    Route::delete('/profile/document-assets/{kind}', [\App\Http\Controllers\DocumentAssetController::class, 'destroy'])->whereIn('kind', ['stamp', 'signature'])->middleware('throttle:10,1')->name('profile.document-assets.destroy');
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
 });

@@ -4,6 +4,7 @@ namespace App\Enums;
 
 enum BusinessNotificationType: string
 {
+    case AdminMessage = 'admin_message';
     case DemoRequestReceived = 'demo_request_received';
     case DemoScheduled = 'demo_scheduled';
     case QuotationIssued = 'quotation_issued';

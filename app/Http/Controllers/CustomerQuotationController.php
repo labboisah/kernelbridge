@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Domain\Documents\DocumentAssets;
 use App\Domain\Sales\Services\QuotationManager;
 use App\Models\Quotation;
 use Illuminate\Http\RedirectResponse;
@@ -11,11 +12,11 @@ use Inertia\Response;
 
 final class CustomerQuotationController extends Controller
 {
-    public function show(Quotation $quotation): Response
+    public function show(Quotation $quotation, DocumentAssets $assets): Response
     {
         $expiry = now()->addDays(30);
 
-        return Inertia::render('Quotations/CustomerView', ['quotation' => $quotation->load(['customer', 'items']), 'acceptUrl' => URL::temporarySignedRoute('quotations.customer.accept', $expiry, ['quotation' => $quotation]), 'rejectUrl' => URL::temporarySignedRoute('quotations.customer.reject', $expiry, ['quotation' => $quotation])]);
+        return Inertia::render('Quotations/CustomerView', ['quotation' => $quotation->load(['customer', 'items']), 'acceptUrl' => URL::temporarySignedRoute('quotations.customer.accept', $expiry, ['quotation' => $quotation]), 'rejectUrl' => URL::temporarySignedRoute('quotations.customer.reject', $expiry, ['quotation' => $quotation]), 'documentAssets' => $assets->images()]);
     }
 
     public function accept(Quotation $quotation, QuotationManager $m): RedirectResponse

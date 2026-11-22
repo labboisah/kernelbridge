@@ -4,6 +4,7 @@ import { computed, ref, watch } from 'vue';
 import Dropdown from '@/Components/Dropdown.vue';
 import DropdownLink from '@/Components/DropdownLink.vue';
 import PartnerNavigation from '@/Components/Partner/PartnerNavigation.vue';
+import NotificationLink from '@/Components/NotificationLink.vue';
 
 defineProps({ title: String });
 const navigationOpen = ref(false);
@@ -14,11 +15,12 @@ watch(photoUrl, () => { photoFailed.value = false; });
 </script>
 <template>
     <Head :title="title + ' | Partner portal'" />
-    <div class="min-h-screen bg-slate-100">
+    <div class="account-inputs min-h-screen bg-slate-100">
         <header class="bg-[#061a35] text-white shadow">
             <div class="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
                 <Link href="/" class="isolate flex items-center gap-3"><img src="/images/1.png" alt="KernelBridge Technologies" width="438" height="426" class="h-11 w-11 object-cover mix-blend-screen" /><span class="font-semibold">Partners</span></Link>
                 <div class="flex items-center gap-3 text-sm">
+                    <NotificationLink />
                     <button class="rounded-lg border border-white/20 px-3 py-2 lg:hidden" type="button" :aria-expanded="navigationOpen" aria-controls="partner-sidebar" @click="navigationOpen=!navigationOpen">Menu</button>
                     <Dropdown align="right">
                         <template #trigger="{ open }">

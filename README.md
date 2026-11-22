@@ -72,9 +72,21 @@ npm run build
 ## Queue and Redis
 
 ```bash
-php artisan queue:work redis --queue=default --tries=3
+php artisan queue:work redis --queue=notifications,default --tries=3
 php artisan queue:restart
 ```
+
+### Administrator notifications
+
+Super administrators and administrators can compose notifications under Operations > Notifications, save and manage reusable templates, and send to an individual account or one or more existing roles. When email is selected, the composer previews the combined recipient email list; membership is checked again when sending. The customer group also includes linked account holders and customers without accounts; unlinked customers receive email only, and duplicate email addresses are sent once, even across roles. Customers without a valid email address (or without an account when email is not selected) are counted as unreachable. Role groups include suspended accounts. Account holders can read their notifications and mark them read using the notification bell.
+
+Apply `2026_11_22_000009_create_admin_notification_tables` and rebuild the frontend. The configured mail transport must be able to deliver mail, and a queue worker must listen on `notifications` as well as `default`; with the database driver, for example, use `php artisan queue:work database --queue=notifications,default --tries=3`. Submission history records accepted recipients and unreachable counts, not confirmed email delivery. Monitor and retry failed queue jobs.
+
+### Company document images
+
+Administrators can upload, replace or remove a shared company signature and stamp from Profile. Images must be JPG or PNG, up to 2 MB each, and are stored privately. They appear automatically on administrator and customer invoice and quotation views, partner quotation PDFs, and printable receipts for verified, unreversed payments. Anyone receiving those documents can see the images, including partners generating quotations. Images are not snapshotted: replacing or removing them changes later renders of existing documents, but not PDFs already downloaded. Apply migration `2026_11_22_000011_create_document_assets_table` and rebuild the frontend.
+
+Administrators can upload a private JPG or PNG account photo (up to 2 MB) from the Profile link in their navbar account menu. Apply `2026_11_22_000010_add_admin_photo_to_users` and rebuild the frontend; accounts without a photo show a default icon.
 
 Manage production workers using Supervisor or systemd. Inspect and retry failures with `php artisan queue:failed` and `php artisan queue:retry <id>`.
 

@@ -2,8 +2,10 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Domain\Documents\DocumentAssets;
 use App\Domain\Finance\Services\PaymentManager;
 use App\Domain\Security\Contracts\FileScanner;
+use App\Enums\PaymentStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StorePaymentRequest;
 use App\Http\Requests\Admin\VerifyPaymentRequest;
@@ -48,7 +50,20 @@ final class PaymentController extends Controller
         $payment->load(['customer', 'verifier:id,name', 'recorder:id,name', 'allocations.invoice']);
         $invoices = Invoice::query()->where('customer_id', $payment->customer_id)->where('currency', $payment->currency)->whereIn('status', ['issued', 'partially_paid', 'overdue'])->where('balance', '>', 0)->orderBy('due_date')->get(['id', 'uuid', 'invoice_number', 'total', 'balance', 'currency', 'due_date']);
 
-        return Inertia::render('Admin/Payments/Show', ['payment' => $payment, 'invoices' => $invoices]);
+        return Inertia::render('Admin/Payments/Show', ['payment' => $payment, 'invoices' => $invoices,
+            'receiptAvailable' => $payment->status === PaymentStatus::Verified && ! Payment::where('parent_payment_id', $payment->id)->exists(),
+        ]);
+    }
+
+    public function receipt(Payment $payment, DocumentAssets $assets): Response
+    {
+        $this->authorize('view', $payment);
+        abort_unless($payment->status === PaymentStatus::Verified && ! Payment::where('parent_payment_id', $payment->id)->exists(), 404);
+
+        return Inertia::render('Admin/Payments/Receipt', [
+            'payment' => $payment->load(['customer', 'allocations.invoice']),
+            'documentAssets' => $assets->images(),
+        ]);
     }
 
     public function verify(VerifyPaymentRequest $request, Payment $payment, PaymentManager $manager): RedirectResponse

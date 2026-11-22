@@ -12,8 +12,12 @@ use App\Notifications\QuotationSent;
 use Database\Seeders\ProductSeeder;
 use Database\Seeders\RoleAndPermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
+use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
 
 final class QuotationManagementTest extends TestCase
@@ -85,6 +89,19 @@ final class QuotationManagementTest extends TestCase
         $this->post($url)->assertRedirect();
         $this->assertSame('rejected', $q->fresh()->status->value);
         $this->get(route('quotations.customer.show', $q))->assertForbidden();
+    }
+
+    public function test_quotation_views_include_shared_company_images(): void
+    {
+        Storage::fake('local');
+        $path = UploadedFile::fake()->image('signature.png')->store('document-assets', 'local');
+        DB::table('document_assets')->where('id', 1)->update(['signature_path' => $path]);
+        $image = 'data:image/png;base64,'.base64_encode(Storage::disk('local')->get($path));
+        $this->actingAs($this->admin())->post(route('admin.quotations.store'), $this->payload($this->customer()))->assertRedirect();
+        $quotation = Quotation::firstOrFail();
+        $this->get(route('admin.quotations.show', $quotation))->assertInertia(fn (Assert $page) => $page->where('documentAssets.signature', $image));
+        $this->get(URL::temporarySignedRoute('quotations.customer.show', now()->addHour(), ['quotation' => $quotation]))
+            ->assertInertia(fn (Assert $page) => $page->where('documentAssets.signature', $image));
     }
 
     private function admin(): User

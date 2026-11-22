@@ -5,13 +5,14 @@ import Dropdown from '@/Components/Dropdown.vue';
 import DropdownLink from '@/Components/DropdownLink.vue';
 import NavLink from '@/Components/NavLink.vue';
 import ResponsiveNavLink from '@/Components/ResponsiveNavLink.vue';
+import NotificationLink from '@/Components/NotificationLink.vue';
 import { Link } from '@inertiajs/vue3';
 
 const showingNavigationDropdown = ref(false);
 </script>
 
 <template>
-    <div>
+    <div class="account-inputs">
         <div class="min-h-screen bg-gray-100">
             <nav
                 class="border-b border-gray-100 bg-white"
@@ -43,6 +44,7 @@ const showingNavigationDropdown = ref(false);
                         </div>
 
                         <div class="hidden sm:ms-6 sm:flex sm:items-center">
+                            <span class="rounded-lg bg-slate-800"><NotificationLink /></span>
                             <!-- Settings Dropdown -->
                             <div class="relative ms-3">
                                 <Dropdown align="right" width="48">
@@ -90,6 +92,7 @@ const showingNavigationDropdown = ref(false);
 
                         <!-- Hamburger -->
                         <div class="-me-2 flex items-center sm:hidden">
+                            <span class="mr-3 rounded-lg bg-slate-800"><NotificationLink /></span>
                             <button
                                 @click="
                                     showingNavigationDropdown =

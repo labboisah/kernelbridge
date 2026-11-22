@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Domain\Documents\DocumentAssets;
 use App\Domain\Sales\Services\QuotationManager;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StoreQuotationRequest;
@@ -37,11 +38,11 @@ final class QuotationController extends Controller
         return redirect()->route('admin.quotations.show', $q)->with('success', 'Quotation created.');
     }
 
-    public function show(Quotation $quotation): Response
+    public function show(Quotation $quotation, DocumentAssets $assets): Response
     {
         $this->authorize('view', $quotation);
 
-        return Inertia::render('Admin/Quotations/Show', ['quotation' => $quotation->load(['customer', 'items', 'creator:id,name', 'invoice'])]);
+        return Inertia::render('Admin/Quotations/Show', ['quotation' => $quotation->load(['customer', 'items', 'creator:id,name', 'invoice']), 'documentAssets' => $assets->images()]);
     }
 
     public function edit(Quotation $quotation): Response

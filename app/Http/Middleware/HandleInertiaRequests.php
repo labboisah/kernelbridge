@@ -34,6 +34,10 @@ class HandleInertiaRequests extends Middleware
             ...parent::share($request),
             'auth' => [
                 'user' => $request->user(),
+                'admin_photo_url' => fn (): ?string => $request->user()?->admin_photo_path
+                    && $request->user()->hasAnyRole(['admin', 'super_admin'])
+                        ? route('profile.photo', ['v' => substr(hash('sha256', $request->user()->admin_photo_path), 0, 16)])
+                        : null,
                 'partner_photo_url' => function () use ($request): ?string {
                     if (! $request->user()) {
                         return null;
@@ -60,6 +64,7 @@ class HandleInertiaRequests extends Middleware
                     : [],
                 'roles' => fn (): array => $request->user()?->getRoleNames()->all() ?? [],
                 'permissions' => fn (): array => $request->user()?->getAllPermissions()->pluck('name')->all() ?? [],
+                'unread_notifications' => fn (): int => $request->user()?->unreadNotifications()->count() ?? 0,
             ],
             'flash' => [
                 'success' => fn (): ?string => $request->session()->get('success'),

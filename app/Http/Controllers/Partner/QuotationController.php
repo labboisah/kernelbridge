@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Partner;
 
 use App\Domain\Audit\Contracts\AuditRecorder;
+use App\Domain\Documents\DocumentAssets;
 use App\Domain\Partners\QuotationPlanContents;
 use App\Domain\Sales\Services\QuotationCalculator;
 use App\Http\Controllers\Controller;
@@ -130,14 +131,14 @@ final class QuotationController extends Controller
         return redirect()->route('partner.quotations.index')->with('success', 'Quotation created. Download its PDF from the list below.');
     }
 
-    public function pdf(Request $request, string $quotation)
+    public function pdf(Request $request, string $quotation, DocumentAssets $assets)
     {
         $this->authorizePartner($request);
         $record = PartnerQuotation::where('partner_user_id', $request->user()->id)->where('uuid', $quotation)->firstOrFail();
         $options = new Options;
         $options->setIsRemoteEnabled(false);
         $pdf = new Dompdf($options);
-        $pdf->loadHtml(view('partner.quotation-pdf', ['quotation' => $record])->render(), 'UTF-8');
+        $pdf->loadHtml(view('partner.quotation-pdf', ['quotation' => $record, 'documentAssets' => $assets->images()])->render(), 'UTF-8');
         $pdf->setPaper('A4');
         $pdf->render();
 

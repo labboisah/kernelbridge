@@ -76,6 +76,12 @@
         @endif
     @endif
     @if ($quotation->terms)<h2>Terms</h2><div class="multiline">{{ $quotation->terms }}</div>@endif
+    @if (($documentAssets['signature'] ?? null) || ($documentAssets['stamp'] ?? null))
+        <div style="margin-top: 24px;">
+            @if ($documentAssets['signature'])<img src="{{ $documentAssets['signature'] }}" alt="Company signature" style="max-width: 150px; max-height: 65px; margin-right: 24px;">@endif
+            @if ($documentAssets['stamp'])<img src="{{ $documentAssets['stamp'] }}" alt="Company stamp" style="max-width: 100px; max-height: 100px;">@endif
+        </div>
+    @endif
     <p class="muted">This quotation is not an invoice. A later invoice is subject to the catalogue pricing and subscription rules in effect when it is created.</p>
 </body>
 </html>

@@ -18,6 +18,7 @@ defineProps({
         <template v-else-if="name === 'commission' || name === 'nrs-commission'"><circle cx="12" cy="12" r="9"/><path d="M16 8.5c-.7-.8-1.8-1.2-3.1-1.2-1.7 0-2.9.9-2.9 2.2 0 3.5 6 1.4 6 4.7 0 1.4-1.3 2.5-3.2 2.5-1.4 0-2.7-.5-3.5-1.5M12 5.5v13"/></template>
         <template v-else-if="name === 'effort-points'"><path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/></template>
         <template v-else-if="name === 'support'"><path d="M4 14a8 8 0 0 1 16 0"/><path d="M18 19c0 1.7-1.3 3-3 3h-3"/><rect x="2" y="13" width="4" height="6" rx="2"/><rect x="18" y="13" width="4" height="6" rx="2"/></template>
+        <template v-else-if="name === 'notifications'"><path d="M18 8a6 6 0 0 0-12 0c0 7-2 7-2 9h16c0-2-2-2-2-9M10 21h4"/></template>
         <template v-else-if="name === 'support-teams'"><circle cx="8" cy="8" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M2 21a6 6 0 0 1 12 0M13 17a5 5 0 0 1 9 3"/></template>
         <template v-else-if="name === 'demo-mode'"><path d="M8 3h8l1 4H7z"/><rect x="4" y="7" width="16" height="14" rx="2"/><path d="m10 12 5 3-5 3z"/></template>
         <template v-else-if="name === 'mcp'"><path d="M12 3v4"/><path d="M12 17v4"/><path d="M3 12h4"/><path d="M17 12h4"/><rect x="7" y="7" width="10" height="10" rx="2"/><path d="M9 10h6M9 14h6"/></template>

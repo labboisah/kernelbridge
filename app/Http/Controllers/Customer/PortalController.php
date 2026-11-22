@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Customer;
 
+use App\Domain\Documents\DocumentAssets;
 use App\Domain\Finance\Services\CustomerCreditService;
 use App\Domain\Finance\Services\FlutterwavePaymentService;
 use App\Domain\Finance\Services\InvoiceManager;
@@ -439,7 +440,7 @@ final class PortalController extends Controller
         ])]);
     }
 
-    public function showInvoice(Request $request, Invoice $invoice): Response
+    public function showInvoice(Request $request, Invoice $invoice, DocumentAssets $assets): Response
     {
         abort_unless($request->user()->customers()->whereKey($invoice->customer_id)->exists(), 403);
         $invoice->load(['customer', 'items', 'payments']);
@@ -467,6 +468,7 @@ final class PortalController extends Controller
 
         return Inertia::render('Invoices/CustomerView', [
             'invoice' => $invoice,
+            'documentAssets' => $assets->images(),
             'clientSetup' => $clientSetup,
             'availableCredit' => CustomerCreditService::money(app(CustomerCreditService::class)->balance($invoice->customer_id, $invoice->currency)),
             'canPayOnline' => filled(config('services.flutterwave.secret_key'))

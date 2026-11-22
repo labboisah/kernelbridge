@@ -23,6 +23,11 @@
     :where(input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='hidden']):not([type='button']):not([type='submit']):not([type='reset']), select, textarea) { @apply w-full rounded-xl border-slate-300 bg-white text-slate-900 shadow-sm transition-colors placeholder:text-slate-400 focus:border-[#0797A5] focus:ring-[#0797A5] disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500; }
     .form-card :where(input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='hidden']):not([type='button']):not([type='submit']):not([type='reset']), select, textarea) { @apply mt-2; }
     :where(input[type='checkbox'], input[type='radio']) { @apply m-0 h-4 w-4 shrink-0 border-slate-300 bg-white text-[#0797A5] shadow-sm focus:ring-[#0797A5]; }
+    .account-inputs :where(label) { @apply text-sm font-medium text-gray-700; }
+    .account-inputs :is(input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='hidden']):not([type='button']):not([type='submit']):not([type='reset']), select, textarea) { @apply rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500; }
+    .account-inputs input[type='file'] { @apply border bg-white px-3 py-2 disabled:bg-slate-100; }
+    .account-inputs input[type='checkbox'] { @apply rounded border-slate-300 text-[#0797A5] shadow-sm focus:ring-[#0797A5]; }
+    .account-inputs input[type='radio'] { @apply border-slate-300 text-[#0797A5] shadow-sm focus:ring-[#0797A5]; }
     .form-button { @apply rounded-xl bg-[#0797A5] px-6 py-3.5 font-bold text-white transition hover:bg-[#067f8b] disabled:cursor-not-allowed disabled:opacity-60; }
     .success-message { @apply rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-semibold text-emerald-800; }
 }
