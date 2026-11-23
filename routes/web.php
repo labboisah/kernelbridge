@@ -167,7 +167,7 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
         Route::get('/notifications/recipients', [\App\Http\Controllers\Admin\NotificationController::class, 'recipients'])->middleware('role:super_admin|admin')->name('notifications.recipients');
         Route::get('/notifications/role-recipients', [\App\Http\Controllers\Admin\NotificationController::class, 'roleRecipients'])->middleware('role:super_admin|admin')->name('notifications.role-recipients');
         Route::get('/notifications/progress', [\App\Http\Controllers\Admin\NotificationController::class, 'progress'])->middleware('role:super_admin|admin')->name('notifications.progress');
-        Route::post('/notifications', [\App\Http\Controllers\Admin\NotificationController::class, 'store'])->middleware(['role:super_admin|admin', 'throttle:10,1'])->name('notifications.store');
+        Route::post('/notifications', [\App\Http\Controllers\Admin\NotificationController::class, 'store'])->middleware(['role:super_admin|admin', 'throttle:admin-notification-send'])->name('notifications.store');
         Route::post('/notification-templates', [\App\Http\Controllers\Admin\NotificationController::class, 'storeTemplate'])->middleware('role:super_admin|admin')->name('notification-templates.store');
         Route::put('/notification-templates/{template}', [\App\Http\Controllers\Admin\NotificationController::class, 'updateTemplate'])->middleware('role:super_admin|admin')->name('notification-templates.update');
         Route::delete('/notification-templates/{template}', [\App\Http\Controllers\Admin\NotificationController::class, 'destroyTemplate'])->middleware('role:super_admin|admin')->name('notification-templates.destroy');

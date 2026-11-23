@@ -101,6 +101,8 @@ sudo chmod 644 /etc/cron.d/kernelbridge
 
 Workers prioritize the `notifications` queue and then `default`. During each deployment run `php artisan queue:restart` or restart the Supervisor group after switching the `current` symlink.
 
+If notification deliveries remain pending, check `sudo supervisorctl status kernelbridge-worker:*` and the Supervisor worker log. Confirm that the worker's queue connection matches the application's configured `QUEUE_CONNECTION` and that it listens on `notifications`; the supplied Supervisor configuration uses Redis. Check `php artisan queue:failed` and the Laravel log for failed jobs. Restart workers after deployment and monitor the existing submission before sending again to avoid duplicates. A pending delivery has not yet been confirmed sent; investigate the mail transport if deliveries fail after processing.
+
 ## 7. Backups
 
 Store MySQL credentials in `/root/.my.cnf` with mode `600`:

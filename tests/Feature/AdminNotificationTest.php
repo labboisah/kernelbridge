@@ -18,6 +18,7 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Str;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
 
@@ -94,6 +95,24 @@ final class AdminNotificationTest extends TestCase
         Queue::assertPushed(DeliverAdminNotification::class, fn ($job) => $job->queue === 'notifications' && $job->channel === 'database');
         Queue::assertPushed(DeliverAdminNotification::class, fn ($job) => $job->queue === 'notifications' && $job->channel === 'mail');
         Queue::assertPushed(DeliverAdminNotification::class, 2);
+    }
+
+    public function test_progress_requests_do_not_consume_the_notification_send_limit(): void
+    {
+        Queue::fake();
+        $admin = $this->user();
+        $recipient = $this->user('partner');
+        $this->actingAs($admin);
+        $url = route('admin.notifications.progress', ['messages' => [(string) Str::uuid()]]);
+        for ($i = 0; $i < 12; $i++) {
+            $this->getJson($url)->assertOk();
+        }
+        for ($i = 0; $i < 10; $i++) {
+            $this->post(route('admin.notifications.store'), $this->payload('user', $recipient->public_id))
+                ->assertSessionHasNoErrors()->assertRedirect();
+        }
+        $this->post(route('admin.notifications.store'), $this->payload('user', $recipient->public_id))->assertStatus(429);
+        $this->assertDatabaseCount('admin_notifications', 10);
     }
 
     public function test_database_queue_worker_delivers_both_channels(): void
