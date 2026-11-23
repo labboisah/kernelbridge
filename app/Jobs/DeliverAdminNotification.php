@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Enums\BusinessNotificationType;
+use App\Models\AdminNotification;
 use App\Models\User;
 use App\Notifications\BusinessNotification;
 use Illuminate\Bus\Queueable;
@@ -43,12 +44,18 @@ final class DeliverAdminNotification implements ShouldQueue
         }
         DB::table('admin_notification_deliveries')->where('id', $this->deliveryId)->update(['status' => 'processing', 'updated_at' => now()]);
         try {
+            $message = AdminNotification::where('uuid', $this->notificationUuid)->with('attachments')->firstOrFail();
             $notifiable = $this->userId !== null
                 ? User::findOrFail($this->userId)
                 : Notification::route('mail', $this->email);
             Notification::sendNow($notifiable, new BusinessNotification(
                 BusinessNotificationType::AdminMessage, $this->subject, $this->message,
-                ['admin_notification_uuid' => $this->notificationUuid], channels: [$this->channel], deliveryId: $this->deliveryId,
+                ['admin_notification_uuid' => $this->notificationUuid, 'message_format' => $message->message_format],
+                channels: [$this->channel], deliveryId: $this->deliveryId,
+                messageFormat: $message->message_format,
+                attachments: $message->attachments->map(fn ($attachment) => [
+                    'path' => $attachment->path, 'name' => $attachment->original_name, 'mime' => $attachment->mime_type,
+                ])->all(),
             ), [$this->channel]);
             if (DB::table('admin_notification_deliveries')->where('id', $this->deliveryId)->value('status') !== 'sent') {
                 throw new RuntimeException('The notification was not sent by its channel.');

@@ -7,7 +7,7 @@ use Illuminate\Support\Str;
 
 final class NotificationTemplate extends Model
 {
-    protected $fillable = ['name', 'subject', 'message', 'created_by'];
+    protected $fillable = ['name', 'subject', 'message', 'message_format', 'created_by'];
 
     protected static function booted(): void
     {

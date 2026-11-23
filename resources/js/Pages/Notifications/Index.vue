@@ -37,7 +37,11 @@ const safeAction = value => {
                     <h2 class="font-bold text-slate-900">{{ notification.data.subject || 'Notification' }}</h2>
                     <span class="text-xs text-slate-500">{{ new Date(notification.created_at).toLocaleString() }}</span>
                 </div>
-                <p class="mt-2 whitespace-pre-wrap text-sm text-slate-700">{{ notification.data.message }}</p>
+                <div v-if="notification.formatted_message" class="notification-message mt-2 text-sm text-slate-700" v-html="notification.formatted_message"></div>
+                <p v-else class="mt-2 whitespace-pre-wrap text-sm text-slate-700">{{ notification.data.message }}</p>
+                <div v-if="notification.attachments?.length" class="mt-3 flex flex-wrap gap-3">
+                    <a v-for="file in notification.attachments" :key="file.uuid" :href="route('notifications.attachments.download', file.uuid)" class="text-sm font-semibold text-cyan-700 underline">{{ file.original_name }}</a>
+                </div>
                 <div class="mt-3 flex flex-wrap gap-4 text-sm">
                     <a v-if="safeAction(notification.data.action_url)" :href="safeAction(notification.data.action_url)" class="font-semibold text-cyan-700">View details</a>
                     <button v-if="!notification.read_at" type="button" class="font-semibold text-cyan-700" @click="router.put(route('notifications.read', notification.id), {}, { preserveScroll: true })">Mark as read</button>

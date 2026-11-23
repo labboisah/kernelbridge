@@ -2,6 +2,7 @@
 import PortalLayout from '@/Layouts/PortalLayout.vue';
 import FormErrors from '@/Components/Partner/FormErrors.vue';
 import Pagination from '@/Components/Partner/Pagination.vue';
+import NotificationEditor from '@/Components/Admin/NotificationEditor.vue';
 import { Head, router, useForm } from '@inertiajs/vue3';
 import { onUnmounted, ref, watch } from 'vue';
 
@@ -41,8 +42,9 @@ const searching = ref(false);
 const searched = ref(false);
 const selectedRecipient = ref(null);
 const selectedTemplate = ref('');
-const form = useForm({ subject: '', message: '', audience_type: 'role', audience_identifier: '', roles: [], channels: ['database', 'mail'] });
-const template = useForm({ name: '', subject: '', message: '' });
+const form = useForm({ subject: '', message: '', message_format: 'html', attachments: [], audience_type: 'role', audience_identifier: '', roles: [], channels: ['database', 'mail'] });
+const template = useForm({ name: '', subject: '', message: '', message_format: 'html' });
+const fileInputKey = ref(0);
 const rolePreview = ref(null);
 const rolePreviewError = ref('');
 const rolePreviewLoading = ref(false);
@@ -110,11 +112,13 @@ const loadTemplate = item => {
     template.name = item.name;
     form.subject = item.subject;
     form.message = item.message;
+    form.message_format = item.message_format;
     template.clearErrors();
 };
 const saveTemplate = update => {
     template.subject = form.subject;
     template.message = form.message;
+    template.message_format = form.message_format;
     if (update) template.put(route('admin.notification-templates.update', selectedTemplate.value), { preserveScroll: true });
     else template.post(route('admin.notification-templates.store'), { preserveScroll: true, onSuccess: () => { selectedTemplate.value = ''; template.reset(); } });
 };
@@ -130,6 +134,7 @@ const submit = () => form.post(route('admin.notifications.store'), {
     preserveScroll: true,
     onSuccess: () => {
         form.reset();
+        fileInputKey.value++;
         mode.value = 'role';
         selectedRecipient.value = null;
     },
@@ -199,7 +204,8 @@ const submit = () => form.post(route('admin.notifications.store'), {
                 </template>
             </section>
             <label>Subject<input v-model="form.subject" required maxlength="180" /></label>
-            <label>Message<textarea v-model="form.message" required maxlength="5000" rows="6" /></label>
+            <NotificationEditor v-model="form.message" :format="form.message_format" @formatted="form.message_format = 'html'" />
+            <label>Attachments<input :key="fileInputKey" type="file" multiple accept=".pdf,.txt,.jpg,.jpeg,.png,.webp" @change="form.attachments = Array.from($event.target.files)" /><span class="mt-1 block text-xs font-normal text-slate-500">PDF, text and images; up to 5 files, 10 MB each. Attachments are selected for each send and are not saved in templates.</span></label>
             <button class="form-button" :disabled="form.processing || !form.channels.length || (mode === 'individual' ? !form.audience_identifier : !form.roles.length || (form.channels.includes('mail') && (rolePreviewLoading || !rolePreview || rolePreview.invalid_users.length)))">{{ form.processing ? 'Submitting...' : 'Send notification' }}</button>
         </form>
 
@@ -225,9 +231,19 @@ const submit = () => form.post(route('admin.notifications.store'), {
             <p v-if="progressError" role="alert" class="mb-4 text-sm text-red-700">{{ progressError }}</p>
             <div class="space-y-3">
                 <article v-for="message in messages.data" :key="message.uuid" class="rounded-xl bg-white p-5">
-                    <h3 class="font-bold">{{ message.subject }}</h3>
-                    <p class="mt-1 whitespace-pre-wrap text-sm text-slate-600">{{ message.message }}</p>
-                    <p class="mt-2 text-sm text-slate-500">{{ message.audience_label }} · {{ message.recipient_count }} recipients · {{ message.email_only_count }} email-only · {{ message.unreachable_count }} unreachable · {{ message.channels.join(', ') }} · {{ message.creator?.name || 'Former administrator' }} · {{ new Date(message.created_at).toLocaleString() }}</p>
+                    <details class="group">
+                        <summary class="history-toggle flex cursor-pointer items-center justify-between gap-3">
+                            <h3 class="font-bold">{{ message.subject }}</h3>
+                            <span class="sr-only">Show or hide message details</span>
+                            <span aria-hidden="true" class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-slate-300 text-xl text-slate-700">
+                                <span class="group-open:hidden">+</span><span class="hidden group-open:inline">−</span>
+                            </span>
+                        </summary>
+                        <div v-if="message.message_format === 'html'" class="notification-message mt-3 text-sm text-slate-600" v-html="message.formatted_message"></div>
+                        <p v-else class="mt-3 whitespace-pre-wrap text-sm text-slate-600">{{ message.message }}</p>
+                        <div v-if="message.attachments.length" class="mt-3 flex flex-wrap gap-3"><a v-for="file in message.attachments" :key="file.uuid" :href="route('notifications.attachments.download', file.uuid)" class="text-sm font-semibold text-cyan-700 underline">{{ file.original_name }}</a></div>
+                        <p class="mt-2 text-sm text-slate-500">{{ message.audience_label }} · {{ message.recipient_count }} recipients · {{ message.email_only_count }} email-only · {{ message.unreachable_count }} unreachable · {{ message.channels.join(', ') }} · {{ message.creator?.name || 'Former administrator' }} · {{ new Date(message.created_at).toLocaleString() }}</p>
+                    </details>
                     <p v-if="!message.delivery_tracking" class="mt-3 text-sm text-slate-500">Delivery progress is unavailable for this older submission.</p>
                     <div v-else-if="progress[message.uuid]" class="mt-4 space-y-3">
                         <div v-for="(counts, channel) in progress[message.uuid]" :key="channel">
@@ -246,3 +262,8 @@ const submit = () => form.post(route('admin.notifications.store'), {
         </section>
     </PortalLayout>
 </template>
+
+<style scoped>
+.history-toggle { list-style: none; }
+.history-toggle::-webkit-details-marker { display: none; }
+</style>

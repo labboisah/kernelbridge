@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Domain\Audit\Contracts\AuditRecorder;
 use App\Domain\Notifications\Services\AdminNotificationService;
+use App\Domain\Notifications\Services\NotificationMessageFormatter;
 use App\Enums\UserRole;
 use App\Http\Controllers\Controller;
 use App\Models\AdminNotification;
@@ -17,12 +18,19 @@ use Inertia\Inertia;
 
 final class NotificationController extends Controller
 {
-    public function index()
+    public function index(NotificationMessageFormatter $formatter)
     {
+        $messages = AdminNotification::with(['creator:id,name', 'attachments'])->latest()->paginate(20);
+        $messages->getCollection()->each(function (AdminNotification $message) use ($formatter): void {
+            if ($message->message_format === 'html') {
+                $message->setAttribute('formatted_message', $formatter->sanitize($message->message, 'html'));
+            }
+        });
+
         return Inertia::render('Admin/Notifications/Index', [
             'roles' => UserRole::names(),
-            'templates' => NotificationTemplate::orderBy('name')->get(['uuid', 'name', 'subject', 'message']),
-            'messages' => AdminNotification::with('creator:id,name')->latest()->paginate(20),
+            'templates' => NotificationTemplate::orderBy('name')->get(['uuid', 'name', 'subject', 'message', 'message_format']),
+            'messages' => $messages,
         ]);
     }
 
@@ -90,11 +98,14 @@ final class NotificationController extends Controller
         ])->header('Cache-Control', 'private, no-store');
     }
 
-    public function store(Request $request, AdminNotificationService $service)
+    public function store(Request $request, AdminNotificationService $service, NotificationMessageFormatter $formatter)
     {
         $data = $request->validate([
             'subject' => ['required', 'string', 'max:180', 'not_regex:/[\r\n]/'],
             'message' => ['required', 'string', 'max:5000'],
+            'message_format' => ['sometimes', Rule::in(['plain', 'html'])],
+            'attachments' => ['sometimes', 'array', 'max:5'],
+            'attachments.*' => ['required', 'file', 'mimes:pdf,txt,jpg,jpeg,png,webp', 'max:10240'],
             'audience_type' => ['required', Rule::in(['user', 'customer', 'role'])],
             'audience_identifier' => [
                 Rule::requiredIf($request->input('audience_type') !== 'role' || ! $request->filled('roles')),
@@ -110,18 +121,23 @@ final class NotificationController extends Controller
             'channels' => ['required', 'array', 'min:1', 'max:2'],
             'channels.*' => ['required', 'distinct', Rule::in(['database', 'mail'])],
         ]);
+        $data['message_format'] ??= 'plain';
+        $data['message'] = $formatter->sanitize($data['message'], $data['message_format']);
         $message = $service->send($request->user(), $data);
 
         return back()->with('success', "Notification submitted for {$message->recipient_count} recipient(s). {$message->unreachable_count} customer(s) could not be reached. Delivery requires the notification queue worker.");
     }
 
-    public function storeTemplate(Request $request, AuditRecorder $audit)
+    public function storeTemplate(Request $request, AuditRecorder $audit, NotificationMessageFormatter $formatter)
     {
         $data = $request->validate([
             'name' => ['required', 'string', 'max:120', 'unique:notification_templates,name'],
             'subject' => ['required', 'string', 'max:180', 'not_regex:/[\r\n]/'],
             'message' => ['required', 'string', 'max:5000'],
+            'message_format' => ['sometimes', Rule::in(['plain', 'html'])],
         ]);
+        $data['message_format'] ??= 'plain';
+        $data['message'] = $formatter->sanitize($data['message'], $data['message_format']);
         DB::transaction(function () use ($data, $request, $audit): void {
             $template = NotificationTemplate::create([...$data, 'created_by' => $request->user()->id]);
             $audit->record('admin.notification_template.created', $request->user(), ['template_uuid' => $template->uuid], $template);
@@ -130,14 +146,17 @@ final class NotificationController extends Controller
         return back()->with('success', 'Notification template saved.');
     }
 
-    public function updateTemplate(Request $request, string $template, AuditRecorder $audit)
+    public function updateTemplate(Request $request, string $template, AuditRecorder $audit, NotificationMessageFormatter $formatter)
     {
         $record = NotificationTemplate::where('uuid', $template)->firstOrFail();
         $data = $request->validate([
             'name' => ['required', 'string', 'max:120', Rule::unique('notification_templates', 'name')->ignore($record->id)],
             'subject' => ['required', 'string', 'max:180', 'not_regex:/[\r\n]/'],
             'message' => ['required', 'string', 'max:5000'],
+            'message_format' => ['sometimes', Rule::in(['plain', 'html'])],
         ]);
+        $data['message_format'] ??= 'plain';
+        $data['message'] = $formatter->sanitize($data['message'], $data['message_format']);
         DB::transaction(function () use ($data, $record, $request, $audit): void {
             $record->update($data);
             $audit->record('admin.notification_template.updated', $request->user(), ['template_uuid' => $record->uuid], $record);

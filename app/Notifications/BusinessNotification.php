@@ -9,6 +9,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use RuntimeException;
 
 final class BusinessNotification extends Notification implements ShouldQueue
@@ -24,6 +25,8 @@ final class BusinessNotification extends Notification implements ShouldQueue
         private readonly ?string $actionLabel = null,
         private readonly ?array $channels = null,
         private readonly ?int $deliveryId = null,
+        private readonly string $messageFormat = 'plain',
+        private readonly array $attachments = [],
     ) {
         $this->afterCommit();
         $this->onQueue('notifications');
@@ -36,7 +39,21 @@ final class BusinessNotification extends Notification implements ShouldQueue
 
     public function toMail(object $notifiable): MailMessage
     {
-        $mail = (new MailMessage)->subject($this->subject)->line($this->message);
+        $mail = (new MailMessage)->subject($this->subject);
+        if (($this->messageFormat ?? 'plain') === 'html') {
+            $mail->view(['html' => 'emails.admin-notification', 'text' => 'emails.admin-notification-text'], [
+                'body' => $this->message,
+            ]);
+        } else {
+            $mail->line($this->message);
+        }
+        foreach ($this->attachments ?? [] as $attachment) {
+            $disk = Storage::disk('local');
+            if (! $disk->exists($attachment['path'])) {
+                throw new RuntimeException('Notification attachment is missing.');
+            }
+            $mail->attach($disk->path($attachment['path']), ['as' => $attachment['name'], 'mime' => $attachment['mime']]);
+        }
 
         return $this->actionUrl ? $mail->action($this->actionLabel ?? 'View details', $this->actionUrl) : $mail;
     }

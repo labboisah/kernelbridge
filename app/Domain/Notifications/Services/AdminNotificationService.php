@@ -3,17 +3,22 @@
 namespace App\Domain\Notifications\Services;
 
 use App\Domain\Audit\Contracts\AuditRecorder;
+use App\Domain\Security\Contracts\FileScanner;
 use App\Enums\UserRole;
 use App\Jobs\DeliverAdminNotification;
 use App\Models\AdminNotification;
 use App\Models\Customer;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use RuntimeException;
+use Throwable;
 
 final readonly class AdminNotificationService
 {
-    public function __construct(private AuditRecorder $audit) {}
+    public function __construct(private AuditRecorder $audit, private FileScanner $scanner) {}
 
     public function recipientsForRoles(array $roles, bool $includeEmailOnly): array
     {
@@ -84,42 +89,81 @@ final readonly class AdminNotificationService
         $mailUsers = $mail ? $users->unique(fn (User $user) => mb_strtolower(trim($user->email)))->values() : collect();
         $recipientCount = ($database ? $users->count() : $mailUsers->count()) + $customers->count();
 
-        return DB::transaction(function () use ($actor, $data, $users, $mailUsers, $customers, $unreachable, $audienceLabel, $database, $mail, $recipientCount): AdminNotification {
-            $message = AdminNotification::create([
-                'created_by' => $actor->id,
-                'subject' => $data['subject'],
-                'message' => $data['message'],
-                'audience_type' => $data['audience_type'],
-                'audience_identifier' => $data['audience_identifier'],
-                'audience_label' => $audienceLabel,
-                'channels' => $data['channels'],
-                'recipient_count' => $recipientCount,
-                'email_only_count' => $customers->count(),
-                'unreachable_count' => $unreachable,
-                'delivery_tracking' => true,
-            ]);
-            if ($database) {
-                foreach ($users as $user) {
-                    $this->queueDelivery($message, 'database', $user->id, null);
+        foreach ($data['attachments'] ?? [] as $file) {
+            $this->scanner->assertClean($file);
+        }
+        $uuid = (string) Str::uuid();
+        $storedPaths = [];
+        try {
+            return DB::transaction(function () use ($actor, $data, $users, $mailUsers, $customers, $unreachable, $audienceLabel, $database, $mail, $recipientCount, $uuid, &$storedPaths): AdminNotification {
+                $message = AdminNotification::create([
+                    'uuid' => $uuid,
+                    'created_by' => $actor->id,
+                    'subject' => $data['subject'],
+                    'message' => $data['message'],
+                    'message_format' => $data['message_format'] ?? 'plain',
+                    'audience_type' => $data['audience_type'],
+                    'audience_identifier' => $data['audience_identifier'],
+                    'audience_label' => $audienceLabel,
+                    'channels' => $data['channels'],
+                    'recipient_count' => $recipientCount,
+                    'email_only_count' => $customers->count(),
+                    'unreachable_count' => $unreachable,
+                    'delivery_tracking' => true,
+                ]);
+                foreach ($data['attachments'] ?? [] as $file) {
+                    $path = $file->store('admin-notification-attachments', 'local');
+                    if ($path === false) {
+                        throw new RuntimeException('Unable to store a notification attachment.');
+                    }
+                    $storedPaths[] = $path;
+                    $name = basename(str_replace('\\', '/', $file->getClientOriginalName()));
+                    $name = preg_replace('/[\x00-\x1f\x7f]/', '', $name);
+                    $message->attachments()->create([
+                        'path' => $path,
+                        'original_name' => Str::limit($name ?: 'attachment', 255, ''),
+                        'mime_type' => $file->getMimeType() ?: 'application/octet-stream',
+                        'size' => $file->getSize(),
+                    ]);
                 }
-            }
-            if ($mail) {
-                foreach ($mailUsers as $user) {
-                    $this->queueDelivery($message, 'mail', $user->id, null);
+                if ($database) {
+                    foreach ($users as $user) {
+                        $this->queueDelivery($message, 'database', $user->id, null);
+                    }
                 }
-                foreach ($customers as $customer) {
-                    $this->queueDelivery($message, 'mail', null, $customer->email);
+                if ($mail) {
+                    foreach ($mailUsers as $user) {
+                        $this->queueDelivery($message, 'mail', $user->id, null);
+                    }
+                    foreach ($customers as $customer) {
+                        $this->queueDelivery($message, 'mail', null, $customer->email);
+                    }
                 }
-            }
-            $this->audit->record('admin.notification.submitted', $actor, [
-                'notification_uuid' => $message->uuid, 'audience_type' => $message->audience_type,
-                'audience_identifier' => $message->audience_identifier, 'channels' => $message->channels,
-                'recipient_count' => $message->recipient_count, 'email_only_count' => $message->email_only_count,
-                'unreachable_count' => $message->unreachable_count,
-            ], $message);
+                $this->audit->record('admin.notification.submitted', $actor, [
+                    'notification_uuid' => $message->uuid, 'audience_type' => $message->audience_type,
+                    'audience_identifier' => $message->audience_identifier, 'channels' => $message->channels,
+                    'recipient_count' => $message->recipient_count, 'email_only_count' => $message->email_only_count,
+                    'unreachable_count' => $message->unreachable_count,
+                ], $message);
 
-            return $message;
-        });
+                return $message;
+            });
+        } catch (Throwable $exception) {
+            try {
+                $committed = AdminNotification::where('uuid', $uuid)->exists();
+            } catch (Throwable $lookupError) {
+                report($lookupError);
+                throw $exception;
+            }
+            if (! $committed) {
+                foreach ($storedPaths as $path) {
+                    if (! Storage::disk('local')->delete($path)) {
+                        report(new RuntimeException('Unable to remove a rolled-back notification attachment.'));
+                    }
+                }
+            }
+            throw $exception;
+        }
     }
 
     private function queueDelivery(AdminNotification $message, string $channel, ?int $userId, ?string $email): void

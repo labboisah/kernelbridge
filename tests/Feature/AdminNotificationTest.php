@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Domain\Audit\Contracts\AuditRecorder;
 use App\Enums\BusinessNotificationType;
 use App\Jobs\DeliverAdminNotification;
 use App\Models\AdminNotification;
@@ -11,6 +12,7 @@ use App\Models\User;
 use App\Notifications\BusinessNotification;
 use Database\Seeders\RoleAndPermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Notifications\Events\NotificationSending;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
@@ -18,6 +20,7 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
@@ -130,6 +133,168 @@ final class AdminNotificationTest extends TestCase
         $this->assertSame(1, $recipient->notifications()->count());
         $this->assertCount(1, Mail::mailer('array')->getSymfonyTransport()->messages());
         $this->assertDatabaseCount('jobs', 0);
+    }
+
+    public function test_in_app_only_role_delivery_appears_in_recipient_inbox_after_queue_processing(): void
+    {
+        config(['queue.default' => 'database']);
+        $admin = $this->user();
+        $recipient = $this->user('partner');
+        $this->actingAs($admin)->post(route('admin.notifications.store'), [
+            ...$this->payload('role', '', ['database']), 'roles' => ['partner'],
+        ])->assertSessionHasNoErrors();
+        $message = AdminNotification::firstOrFail();
+        Artisan::call('queue:work', ['connection' => 'database', '--queue' => 'notifications', '--stop-when-empty' => true, '--sleep' => 0, '--tries' => 1]);
+        $this->getJson(route('admin.notifications.progress', ['messages' => [$message->uuid]]))
+            ->assertJsonPath("progress.{$message->uuid}.database.sent", 1);
+        $this->actingAs($recipient)->get(route('notifications.index'))->assertInertia(fn (Assert $page) => $page
+            ->where('auth.unread_notifications', 1)
+            ->where('notifications.data.0.data.subject', 'Scheduled maintenance')
+            ->where('notifications.data.0.data.message', "First line\nSecond line"));
+    }
+
+    public function test_individual_search_result_and_composer_payload_deliver_to_selected_account(): void
+    {
+        config(['queue.default' => 'database']);
+        $admin = $this->user();
+        $recipient = $this->user('partner');
+        $result = $this->actingAs($admin)->getJson(route('admin.notifications.recipients', ['search' => $recipient->email]))
+            ->assertOk()->json('users.0');
+        $this->assertSame($recipient->public_id, $result['id']);
+        $this->post(route('admin.notifications.store'), [
+            ...$this->payload($result['type'], $result['id'], ['database']), 'roles' => [],
+        ])->assertSessionHasNoErrors();
+        Artisan::call('queue:work', ['connection' => 'database', '--queue' => 'notifications', '--stop-when-empty' => true, '--sleep' => 0, '--tries' => 1]);
+        $this->actingAs($recipient)->get(route('notifications.index'))->assertInertia(fn (Assert $page) => $page
+            ->where('auth.unread_notifications', 1)
+            ->where('notifications.data.0.data.subject', 'Scheduled maintenance'));
+    }
+
+    public function test_formatted_message_and_attachments_reach_email_and_authorized_inbox(): void
+    {
+        Storage::fake('local');
+        config(['queue.default' => 'database', 'mail.default' => 'array']);
+        $admin = $this->user();
+        $recipient = $this->user('partner');
+        $outsider = $this->user('partner');
+        $this->actingAs($admin)->post(route('admin.notifications.store'), [
+            ...$this->payload('user', $recipient->public_id),
+            'message_format' => 'html',
+            'message' => '<h2>News</h2><p><strong>Important</strong> <a href="javascript:alert(1)">link</a><script>alert(1)</script></p>',
+            'attachments' => [UploadedFile::fake()->createWithContent('notice.txt', 'private notice')],
+        ])->assertSessionHasNoErrors();
+        $message = AdminNotification::with('attachments')->firstOrFail();
+        $attachment = $message->attachments->sole();
+        Storage::disk('local')->assertExists($attachment->path);
+        $this->assertStringContainsString('<strong>Important</strong>', $message->message);
+        $this->assertStringNotContainsString('javascript:', $message->message);
+        $this->assertStringNotContainsString('<script', $message->message);
+        Artisan::call('queue:work', ['connection' => 'database', '--queue' => 'notifications', '--stop-when-empty' => true, '--sleep' => 0, '--tries' => 1]);
+        $email = Mail::mailer('array')->getSymfonyTransport()->messages()->first()->getOriginalMessage();
+        $this->assertStringContainsString('<strong>Important</strong>', $email->getHtmlBody());
+        $this->assertStringNotContainsString('javascript:', $email->getHtmlBody());
+        $this->assertStringContainsString('Important', $email->getTextBody());
+        $this->assertCount(1, $email->getAttachments());
+        $this->assertSame('notice.txt', $email->getAttachments()[0]->getFilename());
+        $url = route('notifications.attachments.download', $attachment->uuid);
+        $this->get($url)->assertOk();
+        $this->actingAs($outsider)->get($url)->assertNotFound();
+        $this->actingAs($recipient)->get(route('notifications.index'))->assertInertia(fn (Assert $page) => $page
+            ->where('auth.unread_notifications', 1)
+            ->where('notifications.data.0.formatted_message', $message->message)
+            ->where('notifications.data.0.attachments.0.uuid', $attachment->uuid)
+            ->missing('notifications.data.0.attachments.0.path'));
+        $this->get($url)->assertOk()->assertHeader('Cache-Control', 'no-store, private');
+        $this->get(route('notifications.attachments.download', (string) Str::uuid()))->assertNotFound();
+    }
+
+    public function test_notification_formatting_and_attachment_validation_and_templates(): void
+    {
+        Queue::fake();
+        $admin = $this->user();
+        $recipient = $this->user('partner');
+        $this->actingAs($admin)->post(route('admin.notifications.store'), [
+            ...$this->payload('user', $recipient->public_id),
+            'message_format' => 'html', 'message' => '<p><br></p>',
+        ])->assertSessionHasErrors('message');
+        $this->post(route('admin.notifications.store'), [
+            ...$this->payload('user', $recipient->public_id),
+            'attachments' => [UploadedFile::fake()->create('bad.zip', 2, 'application/zip')],
+        ])->assertSessionHasErrors('attachments.0');
+        $this->post(route('admin.notifications.store'), [
+            ...$this->payload('user', $recipient->public_id),
+            'attachments' => [UploadedFile::fake()->create('large.pdf', 10241, 'application/pdf')],
+        ])->assertSessionHasErrors('attachments.0');
+        $files = array_map(fn ($i) => UploadedFile::fake()->createWithContent("notice{$i}.txt", 'notice'), range(1, 6));
+        $this->post(route('admin.notifications.store'), [
+            ...$this->payload('user', $recipient->public_id), 'attachments' => $files,
+        ])->assertSessionHasErrors('attachments');
+        $this->post(route('admin.notification-templates.store'), [
+            'name' => 'Formatted', 'subject' => 'Hello', 'message_format' => 'html',
+            'message' => '<p><em>Styled</em><img src="https://example.test/a.png" onerror="alert(1)"></p>',
+        ])->assertSessionHasNoErrors();
+        $template = NotificationTemplate::firstOrFail();
+        $this->assertSame('html', $template->message_format);
+        $this->assertStringContainsString('<em>Styled</em>', $template->message);
+        $this->assertStringNotContainsString('<img', $template->message);
+        $this->assertDatabaseCount('admin_notifications', 0);
+    }
+
+    public function test_email_only_customer_receives_notification_attachment(): void
+    {
+        Storage::fake('local');
+        config(['queue.default' => 'database', 'mail.default' => 'array']);
+        $admin = $this->user();
+        $customer = Customer::factory()->create(['email' => 'external@example.test']);
+        $this->actingAs($admin)->post(route('admin.notifications.store'), [
+            ...$this->payload('customer', $customer->uuid, ['mail']),
+            'attachments' => [UploadedFile::fake()->createWithContent('notice.txt', 'private notice')],
+        ])->assertSessionHasNoErrors();
+        Artisan::call('queue:work', ['connection' => 'database', '--queue' => 'notifications', '--stop-when-empty' => true, '--sleep' => 0, '--tries' => 1]);
+        $email = Mail::mailer('array')->getSymfonyTransport()->messages()->first()->getOriginalMessage();
+        $this->assertSame('external@example.test', $email->getTo()[0]->getAddress());
+        $this->assertSame('notice.txt', $email->getAttachments()[0]->getFilename());
+    }
+
+    public function test_missing_attachment_fails_delivery_instead_of_sending_incomplete_email(): void
+    {
+        Storage::fake('local');
+        config(['queue.default' => 'database', 'mail.default' => 'array']);
+        $admin = $this->user();
+        $recipient = $this->user('partner');
+        $this->actingAs($admin)->post(route('admin.notifications.store'), [
+            ...$this->payload('user', $recipient->public_id, ['mail']),
+            'attachments' => [UploadedFile::fake()->createWithContent('notice.txt', 'private notice')],
+        ])->assertSessionHasNoErrors();
+        $message = AdminNotification::with('attachments')->firstOrFail();
+        Storage::disk('local')->delete($message->attachments->sole()->path);
+        Artisan::call('queue:work', ['connection' => 'database', '--queue' => 'notifications', '--stop-when-empty' => true, '--sleep' => 0, '--tries' => 1]);
+        $this->getJson(route('admin.notifications.progress', ['messages' => [$message->uuid]]))
+            ->assertJsonPath("progress.{$message->uuid}.mail.failed", 1);
+        $this->assertCount(0, Mail::mailer('array')->getSymfonyTransport()->messages());
+    }
+
+    public function test_attachment_is_removed_when_notification_transaction_rolls_back(): void
+    {
+        Storage::fake('local');
+        Queue::fake();
+        $admin = $this->user();
+        $recipient = $this->user('partner');
+        $audit = \Mockery::mock(AuditRecorder::class);
+        $audit->shouldReceive('record')->once()->andThrow(new \RuntimeException('Audit failed'));
+        $this->app->instance(AuditRecorder::class, $audit);
+        $this->withoutExceptionHandling();
+        try {
+            $this->actingAs($admin)->post(route('admin.notifications.store'), [
+                ...$this->payload('user', $recipient->public_id),
+                'attachments' => [UploadedFile::fake()->createWithContent('notice.txt', 'private notice')],
+            ]);
+            $this->fail('The failed transaction should be reported.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('Audit failed', $exception->getMessage());
+        }
+        $this->assertDatabaseCount('admin_notifications', 0);
+        $this->assertSame([], Storage::disk('local')->allFiles('admin-notification-attachments'));
     }
 
     public function test_progress_tracks_each_channel_failure_and_retry(): void

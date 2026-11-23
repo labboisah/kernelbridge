@@ -117,6 +117,7 @@ Route::middleware('signed')->group(function (): void {
 Route::middleware(['auth', 'verified'])->group(function (): void {
     Route::get('/dashboard', CustomerDashboardController::class)->name('dashboard');
     Route::get('/notifications', [\App\Http\Controllers\NotificationInboxController::class, 'index'])->name('notifications.index');
+    Route::get('/notification-attachments/{attachment:uuid}', \App\Http\Controllers\AdminNotificationAttachmentController::class)->name('notifications.attachments.download');
     Route::put('/notifications/read-all', [\App\Http\Controllers\NotificationInboxController::class, 'readAll'])->name('notifications.read-all');
     Route::put('/notifications/{notification}/read', [\App\Http\Controllers\NotificationInboxController::class, 'read'])->name('notifications.read');
     Route::get('/staff', StaffDashboardController::class)->middleware('role:sales|finance|support')->name('staff.dashboard');
