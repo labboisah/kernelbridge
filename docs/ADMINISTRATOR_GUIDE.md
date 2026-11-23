@@ -12,6 +12,12 @@ Open the admin dashboard, review health/monitoring, failed jobs, open urgent tic
 - Demo mode: publish product-owned restrictions/reset instructions. KernelBridge never directly resets a product database.
 - Staff access: assign only the role required for the job and review permission changes in audit logs.
 
+## Partner applications
+
+The Partners screen lists draft, submitted, approved, and declined applications. Search by applicant name, email or organization, and filter by status. Use View to review a submitted application, or Edit to update application details without changing its account, consent or review decision. The editor shows guided questions and only displays older open-ended response fields when they contain previous answers.
+
+Deletion permanently removes the application and its private photo, but retains the user account and other records. Deleting an approved sales-agent application revokes approved-agent access. Applications with organization-upgrade records and sales-agent applications with commercial activity cannot be deleted. Follow the retention policy before deleting any application; edits and deletions are recorded in the audit log.
+
 ## Product installation delivery
 
 For products sold with a downloadable installation:

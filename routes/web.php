@@ -178,6 +178,8 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
         Route::post('/partner-network-commissions/{commission}/paid', [\App\Http\Controllers\Admin\PartnerCommissionController::class, 'markNetworkCommissionPaid'])->middleware('role:super_admin|admin')->name('partners.network-commissions.paid');
         Route::get('/partners', [App\Http\Controllers\Admin\PartnerController::class, 'index'])->middleware('role:super_admin|admin')->name('partners.index');
         Route::put('/partners/{application}', [App\Http\Controllers\Admin\PartnerController::class, 'update'])->middleware('role:super_admin|admin')->name('partners.update');
+        Route::patch('/partners/{application}/details', [App\Http\Controllers\Admin\PartnerController::class, 'updateDetails'])->middleware('role:super_admin|admin')->name('partners.details.update');
+        Route::delete('/partners/{application}', [App\Http\Controllers\Admin\PartnerController::class, 'destroy'])->middleware('role:super_admin|admin')->name('partners.destroy');
         Route::put('/organization-upgrades/{upgrade}', [App\Http\Controllers\Admin\PartnerController::class, 'reviewOrganizationUpgrade'])->middleware('role:super_admin|admin')->name('partners.organization-upgrades.review');
         Route::get('/organization-upgrades/{upgrade}/documents/{document}', [App\Http\Controllers\Admin\PartnerController::class, 'downloadOrganizationDocument'])->middleware('role:super_admin|admin')->name('partners.organization-upgrades.documents');
         Route::get('/billing-settings', [\App\Http\Controllers\Admin\BillingSettingsController::class, 'edit'])->middleware('role:super_admin|admin')->name('billing.edit');

@@ -7,7 +7,6 @@ use App\Enums\UserRole;
 use App\Models\Customer;
 use App\Models\Invoice;
 use App\Models\PartnerApplication;
-use App\Models\PartnerCommission;
 use App\Models\PartnerOrganizationUpgrade;
 use App\Models\Plan;
 use App\Models\Product;
@@ -120,6 +119,8 @@ final class PartnerOrganizationUpgradeTest extends TestCase
             ->missing('organizationUpgrades.data.0.office_photo_one_path')
             ->missing('organizationUpgrades.data.0.office_photo_two_path')
             ->missing('organizationUpgrades.data.0.registration_proof_path'));
+        $this->delete(route('admin.partners.destroy', $application))->assertSessionHasErrors('application_delete');
+        $this->assertDatabaseHas('partner_applications', ['id' => $application->id]);
         $this->get('/admin/organization-upgrades/'.$upgrade->id.'/documents/registration')->assertOk()
             ->assertHeader('Cache-Control', 'no-store, private');
         $this->assertDatabaseHas('audit_logs', ['event' => 'partner.organization_document_downloaded', 'actor_id' => $admin->id]);

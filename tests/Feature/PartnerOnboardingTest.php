@@ -4,16 +4,18 @@ namespace Tests\Feature;
 
 use App\Models\PartnerApplication;
 use App\Models\PartnerBankDetails;
+use App\Models\ProspectiveCustomer;
 use App\Models\User;
 use App\Notifications\PartnerApplicationApproved;
 use Database\Seeders\RoleAndPermissionSeeder;
+use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Notifications\SendQueuedNotifications;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Notifications\SendQueuedNotifications;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
 
@@ -73,6 +75,103 @@ class PartnerOnboardingTest extends TestCase
         $this->get(route('partners.onboarding', 'sales_agent'))->assertNotFound();
         $this->post(route('partners.onboarding', 'sales_agent'), $this->submission())->assertForbidden();
         $this->assertDatabaseCount('partner_applications', 1);
+    }
+
+    public function test_admin_lists_and_filters_applications_across_all_statuses(): void
+    {
+        $admin = User::factory()->create();
+        $admin->assignRole('admin');
+        foreach (['draft', 'submitted', 'approved', 'declined'] as $status) {
+            $user = User::factory()->create(['name' => ucfirst($status).' Applicant', 'email' => $status.'@example.test']);
+            (new PartnerApplication)->forceFill(['user_id' => $user->id, 'type' => 'developer', 'status' => $status])->save();
+        }
+        $this->actingAs($admin)->get(route('admin.partners.index'))->assertInertia(fn (Assert $page) => $page
+            ->has('applications.data', 4)
+            ->where('applications.total', 4));
+        $this->get(route('admin.partners.index', ['status' => 'draft', 'search' => 'Draft']))->assertInertia(fn (Assert $page) => $page
+            ->has('applications.data', 1)
+            ->where('applications.data.0.status', 'draft')
+            ->where('filters.status', 'draft')
+            ->where('filters.search', 'Draft'));
+        $this->get(route('admin.partners.index', ['search' => '0']))->assertInertia(fn (Assert $page) => $page
+            ->has('applications.data', 0));
+        $this->get(route('admin.partners.index', ['status' => 'unknown']))->assertSessionHasErrors('status');
+    }
+
+    public function test_admin_can_edit_application_details_without_changing_review_or_consent(): void
+    {
+        $applicant = User::factory()->create();
+        $this->actingAs($applicant)->post('/partners/developer/onboarding', $this->submission())->assertRedirect();
+        $application = PartnerApplication::firstOrFail();
+        $consentedAt = $application->consented_at;
+        $admin = User::factory()->create();
+        $admin->assignRole('admin');
+        $url = route('admin.partners.details.update', $application);
+        $this->patch($url, ['organisation' => 'Unauthorized'])->assertForbidden();
+        $this->actingAs($admin)->patch($url, [
+            'organisation' => 'Updated organization',
+            'phone' => '08012345678',
+            'guided_answers' => ['experience_level' => 'Advanced', 'business_skills' => ['Sales']],
+            'status' => 'approved', 'consented_at' => null, 'user_id' => $admin->id,
+        ])->assertSessionHasNoErrors();
+        $application->refresh();
+        $this->assertSame('Updated organization', $application->organisation);
+        $this->assertSame('submitted', $application->status);
+        $this->assertSame($applicant->id, $application->user_id);
+        $this->assertTrue($consentedAt->equalTo($application->consented_at));
+        $this->assertSame('Advanced', $application->guided_answers['experience_level']);
+        $this->assertDatabaseHas('audit_logs', ['event' => 'partner.application_details_updated', 'actor_id' => $admin->id]);
+        $this->patch($url, ['phone' => '', 'guided_answers' => ['experience_level' => 'Invalid']])
+            ->assertSessionHasErrors('guided_answers.experience_level');
+        $this->patch($url, ['phone' => ''])->assertSessionHasErrors('phone');
+    }
+
+    public function test_admin_deletes_application_but_keeps_user_and_removes_photo(): void
+    {
+        Storage::fake('local');
+        $applicant = User::factory()->create();
+        $path = UploadedFile::fake()->image('photo.png')->store('partner-photos', 'local');
+        $application = new PartnerApplication;
+        $application->forceFill(['user_id' => $applicant->id, 'type' => 'developer', 'status' => 'draft', 'photo_path' => $path])->save();
+        $url = route('admin.partners.destroy', $application);
+        $this->actingAs($applicant)->delete($url)->assertForbidden();
+        $admin = User::factory()->create();
+        $admin->assignRole('admin');
+        $this->actingAs($admin)->delete($url)->assertSessionHasNoErrors();
+        $this->assertDatabaseMissing('partner_applications', ['id' => $application->id]);
+        $this->assertDatabaseHas('users', ['id' => $applicant->id]);
+        Storage::disk('local')->assertMissing($path);
+        $this->assertDatabaseHas('audit_logs', ['event' => 'partner.application_deleted', 'actor_id' => $admin->id]);
+    }
+
+    public function test_admin_is_warned_when_deleted_application_photo_cannot_be_removed(): void
+    {
+        $applicant = User::factory()->create();
+        $application = new PartnerApplication;
+        $application->forceFill(['user_id' => $applicant->id, 'type' => 'developer', 'status' => 'draft', 'photo_path' => 'partner-photos/test.png'])->save();
+        $disk = \Mockery::mock(FilesystemAdapter::class);
+        $disk->shouldReceive('delete')->once()->with('partner-photos/test.png')->andReturn(false);
+        Storage::shouldReceive('disk')->once()->with('local')->andReturn($disk);
+        $admin = User::factory()->create();
+        $admin->assignRole('admin');
+        $this->actingAs($admin)->delete(route('admin.partners.destroy', $application))
+            ->assertSessionHas('error', 'The application was deleted, but its private photo could not be removed. Contact an administrator.');
+        $this->assertDatabaseMissing('partner_applications', ['id' => $application->id]);
+    }
+
+    public function test_sales_agent_application_with_commercial_activity_cannot_be_deleted(): void
+    {
+        $applicant = User::factory()->create();
+        $applicant->assignRole('agent');
+        $application = new PartnerApplication;
+        $application->forceFill(['user_id' => $applicant->id, 'type' => 'sales_agent', 'status' => 'approved'])->save();
+        (new ProspectiveCustomer(['name' => 'Prospect']))->forceFill(['partner_user_id' => $applicant->id])->save();
+        $admin = User::factory()->create();
+        $admin->assignRole('admin');
+        $this->actingAs($admin)->delete(route('admin.partners.destroy', $application))->assertSessionHasErrors('application_delete');
+        $this->assertDatabaseHas('partner_applications', ['id' => $application->id]);
+        $this->assertTrue($applicant->isApprovedAgent());
+        $this->assertDatabaseMissing('audit_logs', ['event' => 'partner.application_deleted']);
     }
 
     public function test_submission_requires_contact_details_and_consent(): void
