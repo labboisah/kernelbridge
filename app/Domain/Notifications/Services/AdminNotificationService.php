@@ -3,14 +3,12 @@
 namespace App\Domain\Notifications\Services;
 
 use App\Domain\Audit\Contracts\AuditRecorder;
-use App\Enums\BusinessNotificationType;
 use App\Enums\UserRole;
+use App\Jobs\DeliverAdminNotification;
 use App\Models\AdminNotification;
 use App\Models\Customer;
 use App\Models\User;
-use App\Notifications\BusinessNotification;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Notification;
 use Illuminate\Validation\ValidationException;
 
 final readonly class AdminNotificationService
@@ -98,25 +96,20 @@ final readonly class AdminNotificationService
                 'recipient_count' => $recipientCount,
                 'email_only_count' => $customers->count(),
                 'unreachable_count' => $unreachable,
+                'delivery_tracking' => true,
             ]);
-            if ($mail) {
-                Notification::send($mailUsers, new BusinessNotification(
-                    BusinessNotificationType::AdminMessage, $data['subject'], $data['message'],
-                    ['admin_notification_uuid' => $message->uuid], channels: $database ? ['database', 'mail'] : ['mail'],
-                ));
-            }
             if ($database) {
-                $databaseUsers = $mail ? $users->whereNotIn('id', $mailUsers->pluck('id')->all()) : $users;
-                Notification::send($databaseUsers, new BusinessNotification(
-                    BusinessNotificationType::AdminMessage, $data['subject'], $data['message'],
-                    ['admin_notification_uuid' => $message->uuid], channels: ['database'],
-                ));
+                foreach ($users as $user) {
+                    $this->queueDelivery($message, 'database', $user->id, null);
+                }
             }
-            foreach ($customers as $customer) {
-                Notification::route('mail', $customer->email)->notify(new BusinessNotification(
-                    BusinessNotificationType::AdminMessage, $data['subject'], $data['message'],
-                    ['admin_notification_uuid' => $message->uuid], channels: ['mail'],
-                ));
+            if ($mail) {
+                foreach ($mailUsers as $user) {
+                    $this->queueDelivery($message, 'mail', $user->id, null);
+                }
+                foreach ($customers as $customer) {
+                    $this->queueDelivery($message, 'mail', null, $customer->email);
+                }
             }
             $this->audit->record('admin.notification.submitted', $actor, [
                 'notification_uuid' => $message->uuid, 'audience_type' => $message->audience_type,
@@ -127,5 +120,14 @@ final readonly class AdminNotificationService
 
             return $message;
         });
+    }
+
+    private function queueDelivery(AdminNotification $message, string $channel, ?int $userId, ?string $email): void
+    {
+        $id = DB::table('admin_notification_deliveries')->insertGetId([
+            'admin_notification_id' => $message->id, 'channel' => $channel, 'status' => 'pending',
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+        DeliverAdminNotification::dispatch($id, $userId, $email, $channel, $message->subject, $message->message, $message->uuid);
     }
 }

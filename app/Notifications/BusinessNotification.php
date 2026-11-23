@@ -8,6 +8,8 @@ use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
+use Illuminate\Support\Facades\DB;
+use RuntimeException;
 
 final class BusinessNotification extends Notification implements ShouldQueue
 {
@@ -21,6 +23,7 @@ final class BusinessNotification extends Notification implements ShouldQueue
         private readonly ?string $actionUrl = null,
         private readonly ?string $actionLabel = null,
         private readonly ?array $channels = null,
+        private readonly ?int $deliveryId = null,
     ) {
         $this->afterCommit();
         $this->onQueue('notifications');
@@ -41,5 +44,17 @@ final class BusinessNotification extends Notification implements ShouldQueue
     public function toArray(object $notifiable): array
     {
         return ['type' => $this->businessType->value, 'subject' => $this->subject, 'message' => $this->message, 'context' => $this->context, 'action_url' => $this->actionUrl];
+    }
+
+    public function afterSending(object $notifiable, string $channel, mixed $response): void
+    {
+        if ($this->deliveryId === null) {
+            return;
+        }
+        if ($channel === 'mail' && $response === null) {
+            throw new RuntimeException('The mail channel did not submit the notification.');
+        }
+        DB::table('admin_notification_deliveries')->where('id', $this->deliveryId)
+            ->update(['status' => 'sent', 'updated_at' => now()]);
     }
 }

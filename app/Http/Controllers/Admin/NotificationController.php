@@ -26,6 +26,33 @@ final class NotificationController extends Controller
         ]);
     }
 
+    public function progress(Request $request)
+    {
+        $data = $request->validate([
+            'messages' => ['required', 'array', 'min:1', 'max:20'],
+            'messages.*' => ['required', 'uuid', 'distinct'],
+        ]);
+        $messages = AdminNotification::whereIn('uuid', $data['messages'])->get(['id', 'uuid', 'delivery_tracking']);
+        $counts = DB::table('admin_notification_deliveries')
+            ->whereIn('admin_notification_id', $messages->pluck('id'))
+            ->selectRaw('admin_notification_id, channel, status, count(*) as total')
+            ->groupBy('admin_notification_id', 'channel', 'status')->get()->groupBy('admin_notification_id');
+        $progress = $messages->mapWithKeys(function (AdminNotification $message) use ($counts): array {
+            if (! $message->delivery_tracking) {
+                return [$message->uuid => null];
+            }
+            $channels = [];
+            foreach ($counts->get($message->id, collect()) as $count) {
+                $channels[$count->channel] ??= ['pending' => 0, 'processing' => 0, 'sent' => 0, 'failed' => 0];
+                $channels[$count->channel][$count->status] = (int) $count->total;
+            }
+
+            return [$message->uuid => $channels];
+        });
+
+        return response()->json(['progress' => $progress])->header('Cache-Control', 'private, no-store');
+    }
+
     public function recipients(Request $request)
     {
         $data = $request->validate(['search' => ['required', 'string', 'min:2', 'max:100']]);

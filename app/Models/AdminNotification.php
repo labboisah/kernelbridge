@@ -17,7 +17,7 @@ final class AdminNotification extends Model
 
     protected function casts(): array
     {
-        return ['channels' => 'array'];
+        return ['channels' => 'array', 'delivery_tracking' => 'boolean'];
     }
 
     public function creator(): BelongsTo

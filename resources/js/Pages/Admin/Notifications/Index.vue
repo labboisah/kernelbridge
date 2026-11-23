@@ -3,9 +3,36 @@ import PortalLayout from '@/Layouts/PortalLayout.vue';
 import FormErrors from '@/Components/Partner/FormErrors.vue';
 import Pagination from '@/Components/Partner/Pagination.vue';
 import { Head, router, useForm } from '@inertiajs/vue3';
-import { ref, watch } from 'vue';
+import { onUnmounted, ref, watch } from 'vue';
 
-defineProps({ roles: Array, templates: Array, messages: Object });
+const props = defineProps({ roles: Array, templates: Array, messages: Object });
+const progress = ref({});
+const progressError = ref('');
+let progressTimer;
+let progressController;
+const loadProgress = async () => {
+    const ids = props.messages.data.map(message => message.uuid);
+    if (!ids.length) { progress.value = {}; return; }
+    progressController?.abort();
+    const controller = new AbortController();
+    progressController = controller;
+    try {
+        const url = new URL(route('admin.notifications.progress'));
+        ids.forEach(id => url.searchParams.append('messages[]', id));
+        const response = await fetch(url, { headers: { Accept: 'application/json' }, credentials: 'same-origin', signal: controller.signal });
+        if (!response.ok) throw new Error('Unable to refresh delivery progress.');
+        const data = await response.json();
+        if (!controller.signal.aborted) {
+            progress.value = data.progress;
+            progressError.value = '';
+        }
+    } catch (error) {
+        if (error.name !== 'AbortError') progressError.value = 'Unable to refresh delivery progress. Check your connection or refresh the page.';
+    }
+};
+watch(() => props.messages.data, () => { loadProgress(); }, { immediate: true });
+progressTimer = window.setInterval(() => { if (!document.hidden) loadProgress(); }, 5000);
+onUnmounted(() => { window.clearInterval(progressTimer); progressController?.abort(); });
 const mode = ref('role');
 const search = ref('');
 const results = ref({ users: [], customers: [] });
@@ -194,12 +221,24 @@ const submit = () => form.post(route('admin.notifications.store'), {
 
         <section>
             <h2 class="mb-2 text-xl font-bold">Submission history</h2>
-            <p class="mb-4 text-sm text-slate-600">Submitted notifications are queued, not a confirmation of email delivery. Run a worker for the notifications queue and monitor failed jobs.</p>
+            <p class="mb-4 text-sm text-slate-600">Progress refreshes every 5 seconds. Email sent means accepted by the configured mail transport, not delivered to an inbox. Pending jobs require a worker listening to the notifications queue.</p>
+            <p v-if="progressError" role="alert" class="mb-4 text-sm text-red-700">{{ progressError }}</p>
             <div class="space-y-3">
                 <article v-for="message in messages.data" :key="message.uuid" class="rounded-xl bg-white p-5">
                     <h3 class="font-bold">{{ message.subject }}</h3>
                     <p class="mt-1 whitespace-pre-wrap text-sm text-slate-600">{{ message.message }}</p>
                     <p class="mt-2 text-sm text-slate-500">{{ message.audience_label }} · {{ message.recipient_count }} recipients · {{ message.email_only_count }} email-only · {{ message.unreachable_count }} unreachable · {{ message.channels.join(', ') }} · {{ message.creator?.name || 'Former administrator' }} · {{ new Date(message.created_at).toLocaleString() }}</p>
+                    <p v-if="!message.delivery_tracking" class="mt-3 text-sm text-slate-500">Delivery progress is unavailable for this older submission.</p>
+                    <div v-else-if="progress[message.uuid]" class="mt-4 space-y-3">
+                        <div v-for="(counts, channel) in progress[message.uuid]" :key="channel">
+                            <div class="flex flex-wrap justify-between gap-2 text-sm">
+                                <span class="font-semibold">{{ channel === 'mail' ? 'Email' : 'In-app' }}</span>
+                                <span>{{ counts.sent }} sent · {{ counts.pending }} pending · {{ counts.processing }} processing · {{ counts.failed }} failed</span>
+                            </div>
+                            <progress class="mt-1 h-2 w-full" :value="counts.sent + counts.failed" :max="counts.sent + counts.pending + counts.processing + counts.failed" :aria-label="`${channel === 'mail' ? 'Email' : 'In-app'} delivery progress`"></progress>
+                        </div>
+                    </div>
+                    <p v-else class="mt-3 text-sm text-slate-500">Loading delivery progress...</p>
                 </article>
                 <p v-if="!messages.data.length" class="rounded-xl bg-white p-5 text-slate-600">No notifications submitted yet.</p>
             </div>
