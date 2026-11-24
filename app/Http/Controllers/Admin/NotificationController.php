@@ -20,7 +20,7 @@ final class NotificationController extends Controller
 {
     public function index(NotificationMessageFormatter $formatter)
     {
-        $messages = AdminNotification::with(['creator:id,name', 'attachments'])->latest()->paginate(20);
+        $messages = AdminNotification::with(['creator:id,name', 'attachments'])->latest()->paginate(5);
         $messages->getCollection()->each(function (AdminNotification $message) use ($formatter): void {
             if ($message->message_format === 'html') {
                 $message->setAttribute('formatted_message', $formatter->sanitize($message->message, 'html'));

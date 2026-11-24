@@ -3,6 +3,7 @@
 namespace App\Notifications;
 
 use App\Domain\Notifications\Services\NotificationChannelManager;
+use App\Domain\Notifications\Services\NotificationMessageFormatter;
 use App\Enums\BusinessNotificationType;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -40,9 +41,9 @@ final class BusinessNotification extends Notification implements ShouldQueue
     public function toMail(object $notifiable): MailMessage
     {
         $mail = (new MailMessage)->subject($this->subject);
-        if (($this->messageFormat ?? 'plain') === 'html') {
+        if (($this->messageFormat ?? 'plain') === 'html' || strip_tags($this->message) !== $this->message) {
             $mail->view(['html' => 'emails.admin-notification', 'text' => 'emails.admin-notification-text'], [
-                'body' => $this->message,
+                'body' => app(NotificationMessageFormatter::class)->sanitize($this->message, 'html'),
             ]);
         } else {
             $mail->line($this->message);

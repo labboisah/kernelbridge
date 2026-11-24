@@ -11,7 +11,7 @@ final class NotificationInboxController extends Controller
 {
     public function index(Request $request, NotificationMessageFormatter $formatter)
     {
-        $notifications = $request->user()->notifications()->latest()->paginate(20);
+        $notifications = $request->user()->notifications()->latest()->paginate(5);
         $ids = $notifications->getCollection()->pluck('data.context.admin_notification_uuid')->filter()->unique();
         $messages = AdminNotification::whereIn('uuid', $ids)->with('attachments')->get()->keyBy('uuid');
         $notifications->getCollection()->each(function ($notification) use ($messages, $formatter): void {

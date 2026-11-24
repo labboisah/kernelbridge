@@ -34,20 +34,32 @@ const safeAction = value => {
         </div>
         <div class="space-y-3">
             <article v-for="notification in notifications.data" :key="notification.id" class="rounded-xl bg-white p-5 shadow-sm" :class="!notification.read_at ? 'border-l-4 border-cyan-600' : ''">
-                <div class="flex flex-wrap justify-between gap-3">
-                    <h2 class="font-bold text-slate-900">{{ notification.data.subject || 'Notification' }}</h2>
-                    <span class="text-xs text-slate-500">{{ new Date(notification.created_at).toLocaleString() }}</span>
-                </div>
-                <div v-if="notification.formatted_message" class="notification-message mt-2 text-sm text-slate-700" v-html="notification.formatted_message"></div>
-                <p v-else class="mt-2 whitespace-pre-wrap text-sm text-slate-700">{{ notification.data.message }}</p>
-                <NotificationAttachments :attachments="notification.attachments || []" />
-                <div class="mt-3 flex flex-wrap gap-4 text-sm">
-                    <a v-if="safeAction(notification.data.action_url)" :href="safeAction(notification.data.action_url)" class="font-semibold text-cyan-700">View details</a>
-                    <button v-if="!notification.read_at" type="button" class="font-semibold text-cyan-700" @click="router.put(route('notifications.read', notification.id), {}, { preserveScroll: true })">Mark as read</button>
-                </div>
+                <details class="group">
+                    <summary class="notification-toggle flex cursor-pointer list-none items-center justify-between gap-3">
+                        <div>
+                            <h2 class="font-bold text-slate-900">{{ notification.data.subject || 'Notification' }}</h2>
+                            <span class="text-xs text-slate-500">{{ new Date(notification.created_at).toLocaleString() }}</span>
+                        </div>
+                        <span class="sr-only">Show or hide notification details</span>
+                        <span aria-hidden="true" class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-slate-300 text-xl text-slate-700">
+                            <span class="group-open:hidden">+</span><span class="hidden group-open:inline">−</span>
+                        </span>
+                    </summary>
+                    <div v-if="notification.formatted_message" class="notification-message mt-2 text-sm text-slate-700" v-html="notification.formatted_message"></div>
+                    <p v-else class="mt-2 whitespace-pre-wrap text-sm text-slate-700">{{ notification.data.message }}</p>
+                    <NotificationAttachments :attachments="notification.attachments || []" />
+                    <div class="mt-3 flex flex-wrap gap-4 text-sm">
+                        <a v-if="safeAction(notification.data.action_url)" :href="safeAction(notification.data.action_url)" class="font-semibold text-cyan-700">View details</a>
+                        <button v-if="!notification.read_at" type="button" class="font-semibold text-cyan-700" @click="router.put(route('notifications.read', notification.id), {}, { preserveScroll: true })">Mark as read</button>
+                    </div>
+                </details>
             </article>
             <p v-if="!notifications.data.length" class="rounded-xl bg-white p-5 text-slate-600">No notifications yet.</p>
         </div>
         <Pagination :page="notifications" />
     </component>
 </template>
+
+<style scoped>
+.notification-toggle::-webkit-details-marker { display: none; }
+</style>

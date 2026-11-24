@@ -44,6 +44,24 @@ final class AdminNotificationTest extends TestCase
         return $user;
     }
 
+    public function test_html_markup_in_plain_business_notification_is_rendered_in_the_email(): void
+    {
+        config(['mail.default' => 'array']);
+        $recipient = $this->user('partner');
+
+        Notification::sendNow($recipient, new BusinessNotification(
+            BusinessNotificationType::AdminMessage,
+            'Onboarding reminder',
+            '<p>Dear Partner,</p><p>Please complete your onboarding application.</p>',
+            channels: ['mail'],
+        ));
+
+        $email = Mail::mailer('array')->getSymfonyTransport()->messages()->first()->getOriginalMessage();
+        $this->assertStringContainsString('<p>Dear Partner,</p>', $email->getHtmlBody());
+        $this->assertStringContainsString('Please complete your onboarding application.', $email->getTextBody());
+        $this->assertStringNotContainsString('<p>', $email->getTextBody());
+    }
+
     private function payload(string $type, string $identifier, array $channels = ['database', 'mail']): array
     {
         return ['subject' => 'Scheduled maintenance', 'message' => "First line\nSecond line", 'audience_type' => $type, 'audience_identifier' => $identifier, 'channels' => $channels];
