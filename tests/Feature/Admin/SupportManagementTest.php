@@ -11,6 +11,7 @@ use App\Models\User;
 use App\Notifications\SupportTicketReply;
 use Database\Seeders\ProductSeeder;
 use Database\Seeders\RoleAndPermissionSeeder;
+use Database\Seeders\SupportTeamSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
@@ -25,7 +26,7 @@ final class SupportManagementTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->seed([RoleAndPermissionSeeder::class, ProductSeeder::class]);
+        $this->seed([RoleAndPermissionSeeder::class, ProductSeeder::class, SupportTeamSeeder::class]);
     }
 
     public function test_customer_creates_numbered_ticket_with_sla_attachment_and_notification(): void
@@ -35,7 +36,7 @@ final class SupportManagementTest extends TestCase
         Carbon::setTestNow('2026-08-31 09:00:00');
         [$customer, $user, $product] = $this->customerAccount();
         $support = $this->supportAgent();
-        $response = $this->actingAs($user)->post(route('support.store'), ['product_uuid' => $product->uuid, 'subject' => 'Cannot publish examination results', 'category' => 'technical', 'priority' => 'normal', 'message' => 'Publishing results returns an unexpected validation error.', 'attachments' => [UploadedFile::fake()->image('screen.png')]]);
+        $response = $this->actingAs($user)->post(route('support.store'), ['product_uuid' => $product->uuid, 'subject' => 'Cannot publish examination results', 'category' => 'technical', 'priority' => 'normal', 'message' => 'Publishing results returns an unexpected validation error.', 'attachments' => [UploadedFile::fake()->image('screen.png'), UploadedFile::fake()->createWithContent('details.txt', 'The validation error appears after publishing.')]]);
         $ticket = SupportTicket::query()->firstOrFail();
         $response->assertRedirect(route('support.show', $ticket));
         $this->assertSame('KBT-SUP-000001', $ticket->ticket_number);
@@ -43,9 +44,40 @@ final class SupportManagementTest extends TestCase
         $this->assertSame('2026-09-03 09:00:00', $ticket->resolution_due_at->format('Y-m-d H:i:s'));
         $attachment = $ticket->messages->first()->attachments->first();
         $this->assertNotNull($attachment);
+        $this->assertCount(2, $ticket->messages->first()->attachments);
         Storage::disk('local')->assertExists($attachment->path);
         Notification::assertSentTo($support, SupportTicketReply::class);
+        Notification::assertSentOnDemand(SupportTicketReply::class);
         Carbon::setTestNow();
+    }
+
+    public function test_customer_can_edit_and_resolve_an_open_ticket(): void
+    {
+        [$customer, $user, $product] = $this->customerAccount();
+        $ticket = $this->ticket($customer, $user, $product);
+        $team = SupportTeam::query()->where('is_active', true)->firstOrFail();
+
+        $this->actingAs($user)->put(route('support.update', $ticket), [
+            'product_uuid' => $product->uuid,
+            'team_uuid' => $team->uuid,
+            'subject' => 'Updated deployment assistance',
+            'priority' => 'high',
+            'message' => 'Additional details about the deployment failure.',
+        ])->assertSessionHasNoErrors();
+
+        $ticket->refresh();
+        $this->assertSame('Updated deployment assistance', $ticket->subject);
+        $this->assertSame('high', $ticket->priority->value);
+        $this->assertSame('Additional details about the deployment failure.', $ticket->messages()->oldest()->firstOrFail()->body);
+
+        $this->actingAs($user)->post(route('support.resolve', $ticket))->assertRedirect();
+        $this->assertSame('resolved', $ticket->fresh()->status->value);
+        $this->actingAs($user)->put(route('support.update', $ticket), [
+            'team_uuid' => $team->uuid,
+            'subject' => 'Updated deployment assistance',
+            'priority' => 'high',
+            'message' => 'Additional details about the deployment failure.',
+        ])->assertForbidden();
     }
 
     public function test_support_agent_assigns_replies_notes_closes_and_reopens_ticket(): void

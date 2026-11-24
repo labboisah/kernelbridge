@@ -7,9 +7,10 @@ const page = usePage();
 const partnerApplications = computed(() => page.props.auth.partner_applications || []);
 const groups = [
     { label: 'Workspace', icon: 'overview', links: [['overview', 'partner.dashboard', 'Overview', 'partner.dashboard']] },
-    { label: 'Onboarding', icon: 'customers', links: [['pcr', 'partner.pcr.index', 'PCR register', 'partner.pcr.*'], ['leads', 'partner.crm.index', 'CRM pipeline', 'partner.crm.*'], ['customers', 'partner.customers', 'Clients', 'partner.customers*'], ['quotations', 'partner.quotations.index', 'Quotation', 'partner.quotations.*']] },
-    { label: 'Management', icon: 'customers', links: [['subscriptions', 'partner.subscriptions', 'Subscription', 'partner.subscriptions'], ['payments', 'partner.payments', 'Payment', 'partner.payments'], ['invoices', 'partner.invoices', 'Invoice', 'partner.invoices*'], ['licenses', 'partner.activation-codes', 'Activation code', 'partner.activation-codes']] },
+    { label: 'Onboarding', icon: 'customers', links: [['pcr', 'partner.pcr.index', 'PCR register', 'partner.pcr.*'], ['leads', 'partner.crm.index', 'CRM pipeline', 'partner.crm.*'], ['quotations', 'partner.quotations.index', 'Quotation', 'partner.quotations.*']] },
+    { label: 'Client', icon: 'customers', links: [['customers', 'partner.customers', 'Clients', 'partner.customers*'], ['subscriptions', 'partner.subscriptions', 'Subscription', 'partner.subscriptions'], ['payments', 'partner.payments', 'Payment', 'partner.payments'], ['invoices', 'partner.invoices', 'Invoice', 'partner.invoices*'], ['licenses', 'partner.activation-codes', 'Activation code', 'partner.activation-codes']] },
     { label: 'Finance', icon: 'payments', links: [['commission', 'partner.commission', 'Commission', 'partner.commission'], ['nrs-commission', 'partner.nrs-commission', 'NRS Commission', 'partner.nrs-commission'], ['effort-points', 'partner.effort-points', 'Effort Points', 'partner.effort-points']] },
+    { label: 'Support', icon: 'support', links: [['support', 'partner.support', 'Support', 'partner.support*']] },
     { label: 'Account', icon: 'profile', links: [['profile', 'profile.edit', 'Login & profile', 'profile.*']] },
 ];
 

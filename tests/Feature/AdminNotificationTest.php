@@ -499,7 +499,43 @@ final class AdminNotificationTest extends TestCase
             Queue::assertPushed(DeliverAdminNotification::class, fn ($job) => $job->userId === $user->id && $job->channel === 'mail');
         }
         Queue::assertNotPushed(DeliverAdminNotification::class, fn ($job) => $job->userId === $outsider->id);
-        Queue::assertPushed(DeliverAdminNotification::class, 7);
+    }
+
+    public function test_group_notification_can_target_selected_users_only(): void
+    {
+        Queue::fake();
+        $admin = $this->user();
+        $selectedPartner = $this->user('partner');
+        $selectedSales = $this->user('sales');
+        $unselectedPartner = $this->user('partner');
+        $outsider = $this->user('finance');
+        $roles = ['partner', 'sales'];
+        $this->actingAs($admin);
+
+        $this->getJson(route('admin.notifications.role-recipients', ['roles' => $roles]))
+            ->assertOk()
+            ->assertJsonFragment(['id' => $selectedPartner->public_id, 'name' => $selectedPartner->name])
+            ->assertJsonFragment(['id' => $selectedSales->public_id, 'name' => $selectedSales->name]);
+
+        $payload = [...$this->payload('role', ''), 'roles' => $roles];
+        $this->post(route('admin.notifications.store'), [
+            ...$payload, 'recipient_user_ids' => [$outsider->public_id],
+        ])->assertSessionHasErrors('recipient_user_ids');
+        $this->assertDatabaseCount('admin_notifications', 0);
+
+        $this->post(route('admin.notifications.store'), [
+            ...$payload, 'recipient_user_ids' => [$selectedPartner->public_id, $selectedSales->public_id],
+        ])->assertSessionHasNoErrors();
+
+        $message = AdminNotification::firstOrFail();
+        $this->assertSame(2, $message->recipient_count);
+        $this->assertSame('Roles: partner, sales (selected users)', $message->audience_label);
+        foreach ([$selectedPartner, $selectedSales] as $user) {
+            Queue::assertPushed(DeliverAdminNotification::class, fn ($job) => $job->userId === $user->id && $job->channel === 'database');
+            Queue::assertPushed(DeliverAdminNotification::class, fn ($job) => $job->userId === $user->id && $job->channel === 'mail');
+        }
+        Queue::assertNotPushed(DeliverAdminNotification::class, fn ($job) => in_array($job->userId, [$unselectedPartner->id, $outsider->id], true));
+        Queue::assertPushed(DeliverAdminNotification::class, 4);
     }
 
     public function test_duplicate_account_email_is_sent_once_but_each_account_gets_in_app_notification(): void

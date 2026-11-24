@@ -41,7 +41,10 @@ final readonly class SupportTicketService
 
             return $ticket;
         });
-        $this->notifyStaff($ticket->messages()->first());
+        $message = $ticket->messages()->firstOrFail();
+        $this->notifyStaff($message);
+        $this->notifyCustomer($message, true);
+        $this->notifyPartnerCreator($message, $customer, $actor);
 
         return $ticket;
     }
@@ -75,6 +78,60 @@ final readonly class SupportTicketService
         }
 
         return $message;
+    }
+
+    public function updateByRequester(SupportTicket $ticket, array $data, User $actor): SupportTicket
+    {
+        if (in_array($ticket->status, [SupportStatus::Resolved, SupportStatus::Closed], true)) {
+            throw ValidationException::withMessages(['status' => 'Resolved or closed tickets cannot be edited.']);
+        }
+
+        return DB::transaction(function () use ($ticket, $data, $actor): SupportTicket {
+            $customer = $ticket->customer;
+            $product = ! empty($data['product_uuid'])
+                ? Product::query()->where('uuid', $data['product_uuid'])->firstOrFail()
+                : null;
+            $hasProduct = $product && ($customer->products()->whereKey($product->id)->exists()
+                || $customer->subscriptions()->where('product_id', $product->id)->whereIn('status', ['pending', 'trial', 'active', 'grace', 'suspended'])->exists());
+            if ($product && ! $hasProduct) {
+                throw ValidationException::withMessages(['product_uuid' => 'This product is not linked to this customer account.']);
+            }
+            $team = SupportTeam::query()->where('uuid', $data['team_uuid'])->where('is_active', true)->firstOrFail();
+            $before = $ticket->only(['subject', 'product_id', 'support_team_id', 'category', 'priority']);
+            $updates = [
+                'subject' => $data['subject'],
+                'product_id' => $product?->id,
+                'support_team_id' => $team->id,
+                'category' => $team->slug,
+                'priority' => $data['priority'],
+            ];
+            if ($ticket->priority->value !== $data['priority'] && ! $ticket->first_responded_at) {
+                [$updates['first_response_due_at'], $updates['resolution_due_at']] = $this->deadlinesFrom(SupportPriority::from($data['priority']), $ticket->opened_at);
+            }
+            $ticket->update($updates);
+            $ticket->messages()->oldest()->firstOrFail()->update(['body' => $data['message']]);
+            $this->audit->record('support.ticket_updated_by_requester', $actor, [
+                'ticket_uuid' => $ticket->uuid,
+                'before' => $before,
+                'after' => $ticket->only(['subject', 'product_id', 'support_team_id', 'category', 'priority']),
+            ], $ticket);
+
+            return $ticket->refresh();
+        });
+    }
+
+    public function resolveByRequester(SupportTicket $ticket, User $actor): SupportTicket
+    {
+        if (in_array($ticket->status, [SupportStatus::Resolved, SupportStatus::Closed], true)) {
+            throw ValidationException::withMessages(['status' => 'This ticket is already resolved or closed.']);
+        }
+
+        return DB::transaction(function () use ($ticket, $actor): SupportTicket {
+            $ticket->update(['status' => SupportStatus::Resolved, 'resolved_at' => now()]);
+            $this->audit->record('support.ticket_resolved_by_requester', $actor, ['ticket_uuid' => $ticket->uuid], $ticket);
+
+            return $ticket->refresh();
+        });
     }
 
     public function update(SupportTicket $ticket, array $data, User $actor): SupportTicket
@@ -141,12 +198,26 @@ final readonly class SupportTicketService
         }
     }
 
-    private function notifyCustomer(SupportMessage $message): void
+    private function notifyCustomer(SupportMessage $message, bool $ticketCreated = false): void
     {
         $message->load('ticket.customer');
         if ($message->ticket->customer->email) {
-            Notification::route('mail', $message->ticket->customer->email)->notify(new SupportTicketReply($message, true));
+            Notification::route('mail', $message->ticket->customer->email)->notify(new SupportTicketReply($message, true, $ticketCreated));
         }
+    }
+
+    private function notifyPartnerCreator(SupportMessage $message, Customer $customer, User $actor): void
+    {
+        if (! $actor->isApprovedAgent() || (int) $customer->partner_user_id !== $actor->id) {
+            return;
+        }
+
+        $partnerEmail = trim($actor->email);
+        if ($partnerEmail === '' || strcasecmp($partnerEmail, (string) $customer->email) === 0) {
+            return;
+        }
+
+        Notification::route('mail', $partnerEmail)->notify(new SupportTicketReply($message, false, true, true));
     }
 
     private function notifyStaff(SupportMessage $message): void

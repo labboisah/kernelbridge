@@ -18,6 +18,7 @@ use App\Http\Controllers\Admin\QuotationController as AdminQuotationController;
 use App\Http\Controllers\Admin\StaffController as AdminStaffController;
 use App\Http\Controllers\Admin\SupportTeamController as AdminSupportTeamController;
 use App\Http\Controllers\Admin\SupportTicketController as AdminSupportTicketController;
+use App\Http\Controllers\Admin\UserManagementController as AdminUserManagementController;
 use App\Http\Controllers\Customer\CheckoutController;
 use App\Http\Controllers\Customer\DashboardController as CustomerDashboardController;
 use App\Http\Controllers\Customer\LicensePurchaseController;
@@ -78,7 +79,10 @@ Route::prefix('partner')->name('partner.')->middleware(['auth', 'verified'])->gr
     Route::get('/support', [$controller, 'support'])->name('support');
     Route::post('/support', [$controller, 'storeSupport'])->middleware('throttle:10,1')->name('support.store');
     Route::get('/support/{ticket}', [$controller, 'showSupport'])->name('support.show');
+    Route::put('/support/{ticket:uuid}', [$controller, 'updateSupport'])->name('support.update');
+    Route::post('/support/{ticket}/resolve', [$controller, 'resolveSupport'])->name('support.resolve');
     Route::post('/support/{ticket}/messages', [$controller, 'reply'])->middleware('throttle:20,1')->name('support.reply');
+    Route::get('/support-attachments/{attachment:uuid}', SupportAttachmentController::class)->name('support.attachments.show');
 });
 Route::get('/partners', [\App\Http\Controllers\PublicSite\PartnerController::class, 'index'])->name('partners.index');
 Route::get('/partners/{type}/register', [\App\Http\Controllers\PublicSite\PartnerController::class, 'start'])->name('partners.register');
@@ -162,6 +166,8 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
     Route::get('/support/create', [CustomerSupportTicketController::class, 'create'])->name('support.create');
     Route::post('/support', [CustomerSupportTicketController::class, 'store'])->name('support.store');
     Route::get('/support/{ticket:uuid}', [CustomerSupportTicketController::class, 'show'])->name('support.show');
+    Route::put('/support/{ticket:uuid}', [CustomerSupportTicketController::class, 'update'])->name('support.update');
+    Route::post('/support/{ticket:uuid}/resolve', [CustomerSupportTicketController::class, 'resolve'])->name('support.resolve');
     Route::post('/support/{ticket:uuid}/messages', [CustomerSupportTicketController::class, 'message'])->name('support.messages.store');
     Route::get('/support-attachments/{attachment:uuid}', SupportAttachmentController::class)->name('support.attachments.show');
     Route::prefix('admin')->name('admin.')->middleware(['role:'.implode('|', UserRole::administrative()), 'throttle:120,1'])->group(function (): void {
@@ -189,9 +195,37 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
         Route::get('/hosting', [HostingSettingsController::class, 'edit'])->middleware('role:super_admin|admin')->name('hosting.edit');
         Route::put('/hosting', [HostingSettingsController::class, 'update'])->middleware('role:super_admin|admin')->name('hosting.update');
         Route::get('/', AdminDashboardController::class)->middleware('role:super_admin|admin')->name('dashboard');
+        Route::middleware('role:super_admin')->prefix('users')->name('users.')->group(function (): void {
+            Route::get('/', [AdminUserManagementController::class, 'index'])->name('index');
+            Route::get('/deleted', [AdminUserManagementController::class, 'deleted'])->name('deleted');
+            Route::post('/{user:public_id}/restore', [AdminUserManagementController::class, 'restore'])->withTrashed()->name('restore');
+            Route::put('/{user:public_id}', [AdminUserManagementController::class, 'update'])->name('update');
+            Route::post('/{user:public_id}/password-reset', [AdminUserManagementController::class, 'sendPasswordResetLink'])->middleware('throttle:5,1')->name('password-reset');
+            Route::delete('/{user:public_id}', [AdminUserManagementController::class, 'destroy'])->name('destroy');
+        });
         Route::resource('staff', AdminStaffController::class)->only(['index', 'store', 'update'])->scoped(['staff' => 'public_id']);
-        Route::get('/access-control', [AdminAccessControlController::class, 'index'])->name('access-control.index');
-        Route::put('/access-control/{role}', [AdminAccessControlController::class, 'update'])->name('access-control.update');
+        Route::get('/access-control', fn () => redirect()->route('admin.access-control.role-permissions'))->middleware('role:super_admin')->name('access-control.index');
+        Route::prefix('access-control')->name('access-control.')->middleware('role:super_admin')->group(function (): void {
+            Route::get('/roles', [AdminAccessControlController::class, 'rolesIndex'])->name('roles');
+            Route::post('/roles', [AdminAccessControlController::class, 'storeRole'])->name('roles.store');
+            Route::put('/roles/{role}', [AdminAccessControlController::class, 'updateRole'])->name('roles.update');
+            Route::delete('/roles/{role}', [AdminAccessControlController::class, 'destroyRole'])->name('roles.destroy');
+
+            Route::get('/permissions', [AdminAccessControlController::class, 'permissionsIndex'])->name('permissions');
+            Route::post('/permissions', [AdminAccessControlController::class, 'storePermission'])->name('permissions.store');
+            Route::put('/permissions/{permission}', [AdminAccessControlController::class, 'updatePermission'])->name('permissions.update');
+            Route::delete('/permissions/{permission}', [AdminAccessControlController::class, 'destroyPermission'])->name('permissions.destroy');
+
+            Route::get('/role-permissions', [AdminAccessControlController::class, 'rolePermissions'])->name('role-permissions');
+            Route::put('/role-permissions/{role}', [AdminAccessControlController::class, 'updateRolePermissions'])->name('role-permissions.update');
+
+            Route::get('/user-roles', [AdminAccessControlController::class, 'userRoles'])->name('user-roles');
+            Route::put('/user-roles/{user:public_id}', [AdminAccessControlController::class, 'updateUserRoles'])->name('user-roles.update');
+
+            Route::get('/user-permissions', [AdminAccessControlController::class, 'userPermissions'])->name('user-permissions');
+            Route::put('/user-permissions/{user:public_id}', [AdminAccessControlController::class, 'updateUserPermissions'])->name('user-permissions.update');
+            Route::delete('/user-permissions/{user:public_id}', [AdminAccessControlController::class, 'revokeUserPermissions'])->name('user-permissions.destroy');
+        });
         Route::get('/support', [AdminSupportTicketController::class, 'index'])->name('support.index');
         Route::resource('support-teams', AdminSupportTeamController::class)->only(['index', 'store', 'update', 'destroy']);
         Route::post('/support-teams/{support_team}/members', [AdminSupportTeamController::class, 'addMember'])->name('support-teams.members.store');

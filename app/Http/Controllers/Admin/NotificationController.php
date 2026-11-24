@@ -93,7 +93,13 @@ final class NotificationController extends Controller
 
         return response()->json([
             'recipients' => $recipients,
-            'invalid_users' => $invalidUsers->map(fn (User $user) => ['name' => $user->name, 'email' => $user->email])->values(),
+            'users' => $resolved['users']->map(fn (User $user) => [
+                'id' => $user->public_id,
+                'name' => $user->name,
+                'email' => $user->email,
+                'email_valid' => (bool) filter_var($user->email, FILTER_VALIDATE_EMAIL),
+            ])->values(),
+            'invalid_users' => $invalidUsers->map(fn (User $user) => ['id' => $user->public_id, 'name' => $user->name, 'email' => $user->email])->values(),
             'unreachable_customers' => $resolved['unreachable'],
         ])->header('Cache-Control', 'private, no-store');
     }
@@ -118,6 +124,8 @@ final class NotificationController extends Controller
                 'nullable', 'array', 'min:1', 'max:'.count(UserRole::names()),
             ],
             'roles.*' => ['required', 'string', 'distinct', Rule::in(UserRole::names())],
+            'recipient_user_ids' => ['exclude_unless:audience_type,role', 'sometimes', 'array', 'min:1'],
+            'recipient_user_ids.*' => ['required', 'ulid', 'distinct'],
             'channels' => ['required', 'array', 'min:1', 'max:2'],
             'channels.*' => ['required', 'distinct', Rule::in(['database', 'mail'])],
         ]);

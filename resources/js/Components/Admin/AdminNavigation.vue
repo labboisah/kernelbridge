@@ -5,16 +5,22 @@ import NavigationIcon from '@/Components/NavigationIcon.vue';
 const props = defineProps({ active: { type: String, default: null } });
 const page = usePage();
 const groups = [
-    { label: 'Workspace', icon: 'overview', links: [['overview', 'admin.dashboard', 'Overview', 'admin.dashboard'], ['staff', 'admin.staff.index', 'Staff', 'admin.staff.*'], ['access-control', 'admin.access-control.index', 'Access Control', 'admin.access-control.*']] },
+    { label: 'Workspace', icon: 'overview', links: [['overview', 'admin.dashboard', 'Overview', 'admin.dashboard'], ['staff', 'admin.staff.index', 'Staff', 'admin.staff.*'], ['users', 'admin.users.index', 'User accounts', 'admin.users.*']] },
+    { label: 'Access Control', icon: 'access-control', superAdmin: true, links: [['access-roles', 'admin.access-control.roles', 'Roles', 'admin.access-control.roles'], ['access-permissions', 'admin.access-control.permissions', 'Permissions', 'admin.access-control.permissions'], ['role-permissions', 'admin.access-control.role-permissions', 'Role Permissions', 'admin.access-control.role-permissions*'], ['user-roles', 'admin.access-control.user-roles', 'User Roles', 'admin.access-control.user-roles*'], ['user-permissions', 'admin.access-control.user-permissions', 'User Permission (temporary)', 'admin.access-control.user-permissions*']] },
     { label: 'Sales & customers', icon: 'customers', links: [['leads', 'admin.leads.index', 'CRM Pipeline', 'admin.leads.*'], ['partners', 'admin.partners.index', 'Partners', 'admin.partners.*'], ['customers', 'admin.customers.index', 'Customers', 'admin.customers.*'], ['quotations', 'admin.quotations.index', 'Quotations', 'admin.quotations.*']] },
     { label: 'Finance', icon: 'payments', links: [['commissions', 'admin.partners.commissions', 'Commission settings', 'admin.partners.commissions*'], ['billing', 'admin.billing.edit', 'VAT settings', 'admin.billing.*'], ['invoices', 'admin.invoices.index', 'Invoices', 'admin.invoices.*'], ['payments', 'admin.payments.index', 'Payments', 'admin.payments.*']] },
-    { label: 'Operations', icon: 'support', links: [['notifications', 'admin.notifications.index', 'Notifications', 'admin.notifications.*'], ['support', 'admin.support.index', 'Support', 'admin.support.*'], ['support-teams', 'admin.support-teams.index', 'Support Teams', 'admin.support-teams.*'], ['demo-mode', 'admin.demo-mode.index', 'Demo Mode', 'admin.demo-mode.*'], ['licenses', 'admin.licenses.index', 'Licensing Codes', 'admin.licenses.*'], ['mcp', 'admin.mcp.index', 'Integration Credentials', 'admin.mcp.*']] },
+    { label: 'Operations', icon: 'operations', links: [['notifications', 'admin.notifications.index', 'Notifications', 'admin.notifications.*'], ['licenses', 'admin.licenses.index', 'Licensing Codes', 'admin.licenses.*'], ['mcp', 'admin.mcp.index', 'Integration Credentials', 'admin.mcp.*']] },
+    { label: 'Support', icon: 'support', links: [['support', 'admin.support.index', 'Support', 'admin.support.*'], ['support-teams', 'admin.support-teams.index', 'Support Teams', 'admin.support-teams.*']] },
     { label: 'Catalogue', icon: 'products', links: [['products', 'admin.products.index', 'Products', 'admin.products.*'], ['plans', 'admin.products.index', 'Plans & pricing', 'admin.plans.*'], ['hosting', 'admin.hosting.edit', 'Online implementation', 'admin.hosting.*']] },
 ];
 
-const visibleLinks = group => group.links.filter(link =>
-    link[0] !== 'licenses' || page.props.auth.roles?.some(role => ['super_admin', 'admin'].includes(role)),
-);
+const visibleLinks = group => {
+    if (group.superAdmin && !page.props.auth.roles?.includes('super_admin')) return [];
+    return group.links.filter(link =>
+        (link[0] !== 'licenses' || page.props.auth.roles?.some(role => ['super_admin', 'admin'].includes(role)))
+        && (link[0] !== 'users' || page.props.auth.roles?.includes('super_admin')),
+    );
+};
 const isActive = link => {
     if (link[0] === 'partners' && route().current('admin.partners.commissions*')) return false;
     return props.active ? props.active === link[0] : route().current(link[3]);

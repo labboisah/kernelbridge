@@ -5,7 +5,7 @@ import Pagination from '@/Components/Partner/Pagination.vue';
 import NotificationEditor from '@/Components/Admin/NotificationEditor.vue';
 import NotificationAttachments from '@/Components/NotificationAttachments.vue';
 import { Head, router, useForm } from '@inertiajs/vue3';
-import { onUnmounted, ref, watch } from 'vue';
+import { computed, onUnmounted, ref, watch } from 'vue';
 
 const props = defineProps({ roles: Array, templates: Array, messages: Object });
 const progress = ref({});
@@ -43,17 +43,30 @@ const searching = ref(false);
 const searched = ref(false);
 const selectedRecipient = ref(null);
 const selectedTemplate = ref('');
-const form = useForm({ subject: '', message: '', message_format: 'html', attachments: [], audience_type: 'role', audience_identifier: '', roles: [], channels: ['database', 'mail'] });
+const form = useForm({ subject: '', message: '', message_format: 'html', attachments: [], audience_type: 'role', audience_identifier: '', roles: [], recipient_user_ids: [], channels: ['database', 'mail'] });
 const template = useForm({ name: '', subject: '', message: '', message_format: 'html' });
 const fileInputKey = ref(0);
 const rolePreview = ref(null);
 const rolePreviewError = ref('');
 const rolePreviewLoading = ref(false);
 const roleLabel = role => role.replaceAll('_', ' ');
+const selectedRoleUsers = computed(() => rolePreview.value?.users.filter(user => form.recipient_user_ids.includes(user.id)) || []);
+const selectedEmailRecipients = computed(() => {
+    if (!rolePreview.value) return [];
+    const selectedEmails = new Set(selectedRoleUsers.value.filter(user => user.email_valid).map(user => user.email.trim().toLowerCase()));
+    const allUsersSelected = selectedRoleUsers.value.length === rolePreview.value.users.length;
+    return rolePreview.value.recipients.filter(recipient => recipient.type === 'customer'
+        ? allUsersSelected
+        : selectedEmails.has(recipient.email.trim().toLowerCase()));
+});
+const invalidSelectedRoleUsers = computed(() => rolePreview.value?.invalid_users.filter(user => form.recipient_user_ids.includes(user.id)) || []);
+const hasSelectedGroupRecipient = computed(() => (form.channels.includes('database') && selectedRoleUsers.value.length > 0)
+    || (form.channels.includes('mail') && selectedEmailRecipients.value.length > 0));
 watch(mode, value => {
     form.audience_type = value === 'role' ? 'role' : 'user';
     form.audience_identifier = '';
     selectedRecipient.value = null;
+    form.recipient_user_ids = [];
 });
 watch(search, () => {
     selectedRecipient.value = null;
@@ -61,11 +74,12 @@ watch(search, () => {
     results.value = { users: [], customers: [] };
     searched.value = false;
 });
-watch([mode, () => [...form.roles], () => form.channels.includes('mail')], async ([audienceMode, roles, emailEnabled], previous, onCleanup) => {
+watch([mode, () => [...form.roles]], async ([audienceMode, roles], previous, onCleanup) => {
     rolePreview.value = null;
     rolePreviewError.value = '';
     rolePreviewLoading.value = false;
-    if (audienceMode !== 'role' || !roles.length || !emailEnabled) return;
+    form.recipient_user_ids = [];
+    if (audienceMode !== 'role' || !roles.length) return;
     const controller = new AbortController();
     onCleanup(() => controller.abort());
     rolePreviewLoading.value = true;
@@ -75,6 +89,7 @@ watch([mode, () => [...form.roles], () => form.channels.includes('mail')], async
         const response = await fetch(url, { headers: { Accept: 'application/json' }, credentials: 'same-origin', signal: controller.signal });
         if (!response.ok) throw new Error('Unable to load recipients. Please change your selection or try again.');
         rolePreview.value = await response.json();
+        form.recipient_user_ids = rolePreview.value.users.map(user => user.id);
     } catch (error) {
         if (error.name !== 'AbortError') rolePreviewError.value = error.message || 'Unable to load recipients.';
     } finally {
@@ -108,6 +123,10 @@ const selectRecipient = recipient => {
     form.audience_type = recipient.type;
     form.audience_identifier = recipient.id;
 };
+const selectAllGroupUsers = () => {
+    form.recipient_user_ids = rolePreview.value?.users.map(user => user.id) || [];
+};
+const clearGroupUsers = () => { form.recipient_user_ids = []; };
 const loadTemplate = item => {
     selectedTemplate.value = item.uuid;
     template.name = item.name;
@@ -115,6 +134,10 @@ const loadTemplate = item => {
     form.message = item.message;
     form.message_format = item.message_format;
     template.clearErrors();
+};
+const selectTemplate = uuid => {
+    const item = props.templates.find(template => template.uuid === uuid);
+    if (item) loadTemplate(item);
 };
 const saveTemplate = update => {
     template.subject = form.subject;
@@ -131,15 +154,23 @@ const removeTemplate = () => {
         });
     }
 };
-const submit = () => form.post(route('admin.notifications.store'), {
-    preserveScroll: true,
-    onSuccess: () => {
-        form.reset();
-        fileInputKey.value++;
-        mode.value = 'role';
-        selectedRecipient.value = null;
-    },
-});
+const submit = () => {
+    const selectedUserIds = mode.value === 'role' && rolePreview.value
+        && selectedRoleUsers.value.length < rolePreview.value.users.length
+        ? [...form.recipient_user_ids]
+        : null;
+    form.transform(({ recipient_user_ids, ...data }) => selectedUserIds === null
+        ? data
+        : { ...data, recipient_user_ids: selectedUserIds }).post(route('admin.notifications.store'), {
+        preserveScroll: true,
+        onSuccess: () => {
+            form.reset();
+            fileInputKey.value++;
+            mode.value = 'role';
+            selectedRecipient.value = null;
+        },
+    });
+};
 </script>
 
 <template>
@@ -158,12 +189,11 @@ const submit = () => form.post(route('admin.notifications.store'), {
                 </select>
             </label>
             <fieldset v-if="mode === 'role'">
-                <legend class="font-semibold">Roles (select one or more)</legend>
-                <div class="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                    <label v-for="role in roles" :key="role" class="!flex items-center gap-2 capitalize">
-                        <input v-model="form.roles" type="checkbox" :value="role" class="!mt-0" /> {{ roleLabel(role) }}
-                    </label>
-                </div>
+                <legend class="font-semibold">Groups (select one or more)</legend>
+                <select v-model="form.roles" multiple size="5" aria-label="Select notification groups">
+                    <option v-for="role in roles" :key="role" :value="role" class="capitalize">{{ roleLabel(role) }}</option>
+                </select>
+                <p class="mt-1 text-xs font-normal text-slate-500">Hold Ctrl (Windows/Linux) or Command (Mac) to select multiple groups.</p>
             </fieldset>
             <div v-else class="space-y-3">
                 <label>Search users or email-only customers
@@ -186,44 +216,67 @@ const submit = () => form.post(route('admin.notifications.store'), {
                 </div>
             </fieldset>
             <p class="text-sm text-slate-500">Customer groups include linked account holders and customers without accounts. Email-only customers are skipped if email is not selected or their address is missing or invalid. Groups include suspended accounts.</p>
+            <section v-if="mode === 'role' && form.roles.length" class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                <h3 class="font-bold">Group members</h3>
+                <p class="mt-1 text-sm text-slate-500">All group members are selected by default. Uncheck members to send only to your chosen users. Email-only customers are included only while all group members remain selected.</p>
+                <p v-if="rolePreviewLoading" role="status" class="mt-3 text-sm text-slate-600">Loading group members...</p>
+                <p v-else-if="rolePreviewError" role="alert" class="mt-3 text-sm text-red-700">{{ rolePreviewError }}</p>
+                <template v-else-if="rolePreview">
+                    <p class="mt-3 text-sm font-semibold">{{ selectedRoleUsers.length }} of {{ rolePreview.users.length }} group member(s) selected</p>
+                    <div class="mt-2 flex gap-3 text-sm">
+                        <button type="button" class="font-semibold text-cyan-700" @click="selectAllGroupUsers">Select all</button>
+                        <button type="button" class="font-semibold text-cyan-700" @click="clearGroupUsers">Clear selection</button>
+                    </div>
+                    <div v-if="rolePreview.users.length" class="mt-3 max-h-60 space-y-2 overflow-y-auto rounded-lg border border-slate-200 bg-white p-3">
+                        <label v-for="user in rolePreview.users" :key="user.id" class="!flex items-center gap-2 text-sm font-normal">
+                            <input v-model="form.recipient_user_ids" type="checkbox" :value="user.id" class="!mt-0" />
+                            <span>{{ user.name }} — {{ user.email || 'No email address' }}<span v-if="!user.email_valid" class="ml-1 text-amber-700">(invalid email)</span></span>
+                        </label>
+                    </div>
+                    <p v-else class="mt-3 text-sm text-slate-600">No account holders were found in these groups.</p>
+                </template>
+            </section>
             <section v-if="mode === 'role' && form.roles.length && form.channels.includes('mail')" class="rounded-lg border border-slate-200 bg-slate-50 p-4">
                 <h3 class="font-bold">Email recipients</h3>
-                <p class="mt-1 text-sm text-slate-500">Each email address appears once, even when a person belongs to multiple selected roles. Membership is checked again when you send.</p>
+                <p class="mt-1 text-sm text-slate-500">Each selected email address appears once, even when a person belongs to multiple selected roles. Membership is checked again when you send.</p>
                 <p v-if="rolePreviewLoading" role="status" class="mt-3 text-sm text-slate-600">Loading recipients...</p>
                 <p v-else-if="rolePreviewError" role="alert" class="mt-3 text-sm text-red-700">{{ rolePreviewError }}</p>
                 <template v-else-if="rolePreview">
-                    <p class="mt-3 text-sm font-semibold">{{ rolePreview.recipients.length }} email recipient(s)</p>
-                    <ul v-if="rolePreview.recipients.length" class="mt-2 max-h-60 space-y-1 overflow-y-auto text-sm text-slate-700">
-                        <li v-for="recipient in rolePreview.recipients" :key="recipient.email">{{ recipient.name }} — {{ recipient.email }}<span v-if="recipient.type === 'customer'" class="text-slate-500"> (email only)</span></li>
+                    <p class="mt-3 text-sm font-semibold">{{ selectedEmailRecipients.length }} email recipient(s)</p>
+                    <ul v-if="selectedEmailRecipients.length" class="mt-2 max-h-60 space-y-1 overflow-y-auto text-sm text-slate-700">
+                        <li v-for="recipient in selectedEmailRecipients" :key="recipient.email">{{ recipient.name }} — {{ recipient.email }}<span v-if="recipient.type === 'customer'" class="text-slate-500"> (email only)</span></li>
                     </ul>
                     <p v-else class="mt-2 text-sm text-slate-600">No email recipients found for these roles.</p>
-                    <p v-if="rolePreview.unreachable_customers" class="mt-2 text-sm text-slate-600">{{ rolePreview.unreachable_customers }} customer(s) without accounts have no valid email and will be skipped.</p>
-                    <div v-if="rolePreview.invalid_users.length" role="alert" class="mt-2 text-sm text-red-700">
-                        <p>These users have invalid email addresses. Correct them or send in-app only:</p>
-                        <ul class="list-disc pl-5"><li v-for="user in rolePreview.invalid_users" :key="user.name + user.email">{{ user.name }} — {{ user.email || 'no email' }}</li></ul>
+                    <p v-if="selectedRoleUsers.length === rolePreview.users.length && rolePreview.unreachable_customers" class="mt-2 text-sm text-slate-600">{{ rolePreview.unreachable_customers }} customer(s) without accounts have no valid email and will be skipped.</p>
+                    <div v-if="invalidSelectedRoleUsers.length" role="alert" class="mt-2 text-sm text-red-700">
+                        <p>Selected users with invalid email addresses cannot receive email. Remove them or send in-app only:</p>
+                        <ul class="list-disc pl-5"><li v-for="user in invalidSelectedRoleUsers" :key="user.id">{{ user.name }} — {{ user.email || 'no email' }}</li></ul>
                     </div>
                 </template>
             </section>
             <label>Subject<input v-model="form.subject" required maxlength="180" /></label>
             <NotificationEditor v-model="form.message" :format="form.message_format" @formatted="form.message_format = 'html'" />
             <label>Attachments<input :key="fileInputKey" type="file" multiple accept=".pdf,.txt,.jpg,.jpeg,.png,.webp" @change="form.attachments = Array.from($event.target.files)" /><span class="mt-1 block text-xs font-normal text-slate-500">PDF, text and images; up to 5 files, 10 MB each. Attachments are selected for each send and are not saved in templates.</span></label>
-            <button class="form-button" :disabled="form.processing || !form.channels.length || (mode === 'individual' ? !form.audience_identifier : !form.roles.length || (form.channels.includes('mail') && (rolePreviewLoading || !rolePreview || rolePreview.invalid_users.length)))">{{ form.processing ? 'Submitting...' : 'Send notification' }}</button>
+            <button class="form-button" :disabled="form.processing || !form.channels.length || (mode === 'individual' ? !form.audience_identifier : !form.roles.length || rolePreviewLoading || !rolePreview || !hasSelectedGroupRecipient || (form.channels.includes('mail') && invalidSelectedRoleUsers.length > 0))">{{ form.processing ? 'Submitting...' : 'Send notification' }}</button>
         </form>
 
         <section class="form-card mb-8">
             <h2 class="text-xl font-bold">Reusable templates</h2>
             <p class="text-sm text-slate-600">Load a template into the composer, or save the current subject and message as a template.</p>
             <FormErrors :errors="template.errors" />
+            <label v-if="templates.length">Saved templates
+                <select v-model="selectedTemplate" @change="selectTemplate(selectedTemplate)">
+                    <option value="">Choose a template</option>
+                    <option v-for="item in templates" :key="item.uuid" :value="item.uuid">{{ item.name }} - {{ item.subject }}</option>
+                </select>
+            </label>
+            <p v-else class="text-sm text-slate-500">No templates saved yet.</p>
             <label>Template name<input v-model="template.name" maxlength="120" /></label>
             <div class="flex flex-wrap gap-3">
                 <button type="button" class="form-button" :disabled="template.processing || !template.name || !form.subject || !form.message" @click="saveTemplate(false)">Save as new</button>
                 <button v-if="selectedTemplate" type="button" class="rounded-lg border border-slate-300 px-4 py-2 font-semibold" :disabled="template.processing || !template.name || !form.subject || !form.message" @click="saveTemplate(true)">Update selected</button>
                 <button v-if="selectedTemplate" type="button" class="rounded-lg border border-red-300 px-4 py-2 font-semibold text-red-700" @click="removeTemplate">Delete selected</button>
             </div>
-            <div v-if="templates.length" class="space-y-2">
-                <button v-for="item in templates" :key="item.uuid" type="button" class="block w-full rounded-lg border px-3 py-2 text-left text-sm" :class="selectedTemplate === item.uuid ? 'border-cyan-600 bg-cyan-50' : 'border-slate-200'" @click="loadTemplate(item)">{{ item.name }} - {{ item.subject }}</button>
-            </div>
-            <p v-else class="text-sm text-slate-500">No templates saved yet.</p>
         </section>
 
         <section>

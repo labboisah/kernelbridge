@@ -103,7 +103,7 @@ class ProfileController extends Controller
 
         Auth::logout();
 
-        $user->delete();
+        $user->forceDelete();
         if ($photo && ! Storage::disk('local')->delete($photo)) {
             report(new RuntimeException('Unable to remove a deleted administrator account photo.'));
         }

@@ -12,12 +12,18 @@ defineProps({
         <template v-else-if="name === 'customers'"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></template>
         <template v-else-if="name === 'staff'"><circle cx="9" cy="7" r="4"/><path d="M3 21v-2a6 6 0 0 1 12 0v2M16 11h6M19 8v6"/></template>
         <template v-else-if="name === 'access-control'"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/></template>
+        <template v-else-if="name === 'access-roles'"><circle cx="8" cy="8" r="3"/><path d="M2.5 19a5.5 5.5 0 0 1 11 0M16 8h5M18.5 5.5v5"/></template>
+        <template v-else-if="name === 'access-permissions'"><path d="M4 10V7a4 4 0 0 1 8 0v3"/><rect x="2" y="10" width="12" height="10" rx="2"/><path d="M18 7v10m-3.5-3.5h7"/></template>
+        <template v-else-if="name === 'role-permissions'"><path d="M4 6h16M4 12h16M4 18h16"/><circle cx="9" cy="6" r="2" fill="currentColor"/><circle cx="15" cy="12" r="2" fill="currentColor"/><circle cx="7" cy="18" r="2" fill="currentColor"/></template>
+        <template v-else-if="name === 'user-roles'"><circle cx="8" cy="8" r="3"/><path d="M2.5 20a5.5 5.5 0 0 1 11 0M16 6h5M16 10h5M16 14h5"/></template>
+        <template v-else-if="name === 'user-permissions'"><circle cx="12" cy="12" r="9"/><path d="m8 12 2.5 2.5L16 9"/></template>
         <template v-else-if="name === 'quotations'"><path d="M6 2h9l5 5v15H6z"/><path d="M14 2v6h6M9 13h8M9 17h6"/></template>
         <template v-else-if="name === 'invoices'"><path d="M5 2h14v20l-3-2-4 2-4-2-3 2z"/><path d="M9 8h6M9 12h6M9 16h4"/></template>
         <template v-else-if="name === 'payments'"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h2"/></template>
         <template v-else-if="name === 'commission' || name === 'nrs-commission'"><circle cx="12" cy="12" r="9"/><path d="M16 8.5c-.7-.8-1.8-1.2-3.1-1.2-1.7 0-2.9.9-2.9 2.2 0 3.5 6 1.4 6 4.7 0 1.4-1.3 2.5-3.2 2.5-1.4 0-2.7-.5-3.5-1.5M12 5.5v13"/></template>
         <template v-else-if="name === 'effort-points'"><path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/></template>
         <template v-else-if="name === 'support'"><path d="M4 14a8 8 0 0 1 16 0"/><path d="M18 19c0 1.7-1.3 3-3 3h-3"/><rect x="2" y="13" width="4" height="6" rx="2"/><rect x="18" y="13" width="4" height="6" rx="2"/></template>
+        <template v-else-if="name === 'operations'"><path d="M4 21v-7m0-4V3m8 18v-9m0-4V3m8 18v-5m0-4V3M2 14h4m4-6h4m4 8h4"/></template>
         <template v-else-if="name === 'notifications'"><path d="M18 8a6 6 0 0 0-12 0c0 7-2 7-2 9h16c0-2-2-2-2-9M10 21h4"/></template>
         <template v-else-if="name === 'support-teams'"><circle cx="8" cy="8" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M2 21a6 6 0 0 1 12 0M13 17a5 5 0 0 1 9 3"/></template>
         <template v-else-if="name === 'demo-mode'"><path d="M8 3h8l1 4H7z"/><rect x="4" y="7" width="16" height="14" rx="2"/><path d="m10 12 5 3-5 3z"/></template>

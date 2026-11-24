@@ -13,7 +13,12 @@ final class SupportTicketReply extends Notification implements ShouldQueue
 {
     use Queueable;
 
-    public function __construct(private readonly SupportMessage $message, private readonly bool $forCustomer)
+    public function __construct(
+        private readonly SupportMessage $message,
+        private readonly bool $forCustomer,
+        private readonly bool $ticketCreated = false,
+        private readonly bool $forPartner = false,
+    )
     {
         $this->afterCommit();
     }
@@ -27,7 +32,16 @@ final class SupportTicketReply extends Notification implements ShouldQueue
     {
         $ticket = $this->message->ticket;
 
-        return (new MailMessage)->subject("[{$ticket->ticket_number}] {$ticket->subject}")->line($this->forCustomer ? 'KernelBridge Support replied to your ticket.' : 'A customer replied to a support ticket.')->line(str($this->message->body)->limit(500))->action('View ticket', $this->forCustomer ? route('support.show', $ticket) : route('admin.support.show', $ticket));
+        $intro = $this->ticketCreated
+            ? ($this->forPartner
+                ? 'A support ticket was created for your client. You can track it and reply from the Partner Portal.'
+                : 'We received your support ticket. Our team will review it and reply as soon as possible.')
+            : ($this->forCustomer ? 'KernelBridge Support replied to your ticket.' : 'A customer replied to a support ticket.');
+        $url = $this->forPartner
+            ? route('partner.support.show', $ticket)
+            : ($this->forCustomer ? route('support.show', $ticket) : route('admin.support.show', $ticket));
+
+        return (new MailMessage)->subject("[{$ticket->ticket_number}] {$ticket->subject}")->line($intro)->line(str($this->message->body)->limit(500))->action('View ticket', $url);
     }
 
     public function toArray(object $notifiable): array

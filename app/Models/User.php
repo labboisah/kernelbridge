@@ -7,15 +7,20 @@ use Database\Factories\UserFactory;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Laravel\Sanctum\HasApiTokens;
 use Spatie\Permission\Traits\HasRoles;
+use Spatie\Permission\Models\Permission as SpatiePermission;
 
 class User extends Authenticatable implements MustVerifyEmail
 {
     /** @use HasFactory<UserFactory> */
-    use HasApiTokens, HasFactory, HasRoles, Notifiable;
+    use HasApiTokens, HasFactory, HasRoles, Notifiable, SoftDeletes {
+        hasDirectPermission as protected hasPermanentDirectPermission;
+    }
 
     /**
      * The attributes that are mass assignable.
@@ -86,5 +91,28 @@ class User extends Authenticatable implements MustVerifyEmail
     public function supportTeams(): BelongsToMany
     {
         return $this->belongsToMany(SupportTeam::class)->withTimestamps();
+    }
+
+    public function temporaryPermissions(): BelongsToMany
+    {
+        return $this->belongsToMany(SpatiePermission::class, 'temporary_user_permissions')
+            ->withPivot('expires_at')
+            ->wherePivot('expires_at', '>', now());
+    }
+
+    public function temporaryPermissionGrants(): HasMany
+    {
+        return $this->hasMany(TemporaryUserPermission::class);
+    }
+
+    public function hasDirectPermission($permission): bool
+    {
+        $permission = $this->filterPermission($permission);
+        if ($this->hasPermanentDirectPermission($permission)) {
+            return true;
+        }
+
+        return $this->loadMissing('temporaryPermissions')->temporaryPermissions
+            ->contains($permission->getKeyName(), $permission->getKey());
     }
 }

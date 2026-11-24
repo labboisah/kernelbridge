@@ -2,6 +2,7 @@
 
 namespace Database\Seeders;
 
+use App\Domain\Access\SystemPermissionCatalog;
 use App\Enums\UserRole;
 use Illuminate\Database\Seeder;
 use Spatie\Permission\Models\Permission;
@@ -14,18 +15,20 @@ final class RoleAndPermissionSeeder extends Seeder
     {
         app(PermissionRegistrar::class)->forgetCachedPermissions();
 
-        $productPermissions = ['product.view', 'product.create', 'product.update', 'product.delete'];
-        $planPermissions = ['plan.view', 'plan.create', 'plan.update', 'plan.delete'];
-        $customerPermissions = ['customer.view', 'customer.create', 'customer.update', 'customer.delete', 'customer.note'];
-        $leadPermissions = ['lead.view', 'lead.update', 'lead.note', 'lead.convert', 'demo.manage'];
-        $quotationPermissions = ['quotation.view', 'quotation.create', 'quotation.update', 'quotation.delete', 'quotation.send', 'quotation.convert'];
-        $invoicePermissions = ['invoice.view', 'invoice.create', 'invoice.update', 'invoice.issue', 'invoice.payment', 'invoice.cancel'];
-        $paymentPermissions = ['payment.view', 'payment.create', 'payment.verify', 'payment.reject', 'payment.refund', 'payment.delete'];
-        $demoModePermissions = ['demo.analytics', 'demo.configure'];
-        $supportPermissions = ['support.view', 'support.create', 'support.reply', 'support.note', 'support.manage'];
-        $staffPermissions = ['staff.manage'];
-        $accessPermissions = ['access.manage'];
-        foreach ([...$productPermissions, ...$planPermissions, ...$customerPermissions, ...$leadPermissions, ...$quotationPermissions, ...$invoicePermissions, ...$paymentPermissions, ...$demoModePermissions, ...$supportPermissions, ...$staffPermissions, ...$accessPermissions] as $permission) {
+        $permissionGroups = SystemPermissionCatalog::groups();
+        $productPermissions = $permissionGroups['product'];
+        $planPermissions = $permissionGroups['plan'];
+        $customerPermissions = $permissionGroups['customer'];
+        $leadPermissions = $permissionGroups['lead'];
+        $quotationPermissions = $permissionGroups['quotation'];
+        $invoicePermissions = $permissionGroups['invoice'];
+        $paymentPermissions = $permissionGroups['payment'];
+        $demoModePermissions = $permissionGroups['demo'];
+        $supportPermissions = $permissionGroups['support'];
+        $staffPermissions = $permissionGroups['staff'];
+        $accessPermissions = $permissionGroups['access'];
+
+        foreach (SystemPermissionCatalog::names() as $permission) {
             Permission::findOrCreate($permission, 'web');
         }
 

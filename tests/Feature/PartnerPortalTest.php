@@ -23,9 +23,13 @@ use App\Models\SoftwareLicense;
 use App\Models\SupportTeam;
 use App\Models\SupportTicket;
 use App\Models\User;
+use App\Notifications\SupportTicketReply;
 use Database\Seeders\RoleAndPermissionSeeder;
+use Database\Seeders\SupportTeamSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Storage;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
 
@@ -61,6 +65,67 @@ class PartnerPortalTest extends TestCase
     private function invoice(Customer $customer): Invoice
     {
         return Invoice::factory()->create(['customer_id' => $customer->id, 'total' => '10000.00', 'subtotal' => '10000.00', 'balance' => '10000.00']);
+    }
+
+    public function test_partner_can_create_track_edit_reply_and_resolve_client_ticket_with_attachments(): void
+    {
+        Storage::fake('local');
+        $this->seed(SupportTeamSeeder::class);
+        $partner = $this->agent();
+        $client = $this->client($partner);
+        $team = SupportTeam::query()->where('is_active', true)->firstOrFail();
+
+        $this->actingAs($partner)->post(route('partner.support.store'), [
+            'customer_uuid' => $client->uuid,
+            'team_uuid' => $team->uuid,
+            'subject' => 'Client cannot access portal',
+            'priority' => 'normal',
+            'message' => 'The client receives an error when signing in.',
+            'attachments' => [
+                UploadedFile::fake()->image('error.png'),
+                UploadedFile::fake()->createWithContent('details.txt', 'The error occurred after the latest update.'),
+            ],
+        ])->assertRedirect();
+
+        $ticket = SupportTicket::query()->firstOrFail();
+        $message = $ticket->messages()->oldest()->firstOrFail()->load('attachments');
+        $this->assertCount(2, $message->attachments);
+        foreach ($message->attachments as $attachment) {
+            Storage::disk('local')->assertExists($attachment->path);
+        }
+        Notification::assertSentOnDemand(SupportTicketReply::class, fn ($notification, $channels, $recipient) => ($recipient->routes['mail'] ?? null) === $client->email);
+        Notification::assertSentOnDemand(SupportTicketReply::class, fn ($notification, $channels, $recipient) => ($recipient->routes['mail'] ?? null) === $partner->email);
+
+        $this->get(route('partner.support.show', $ticket))->assertOk()->assertInertia(fn (Assert $page) => $page
+            ->component('Partner/Ticket')
+            ->where('ticket.uuid', $ticket->uuid)
+            ->has('ticket.messages.0.attachments', 2));
+        $this->get(route('partner.support.attachments.show', $message->attachments->first()->uuid))->assertOk();
+
+        $this->put(route('partner.support.update', $ticket), [
+            'team_uuid' => $team->uuid,
+            'subject' => 'Updated portal access issue',
+            'priority' => 'high',
+            'message' => 'The client receives an error after entering their credentials.',
+        ])->assertSessionHasNoErrors();
+        $this->assertSame('Updated portal access issue', $ticket->fresh()->subject);
+        $this->assertSame('high', $ticket->fresh()->priority->value);
+
+        $this->post(route('partner.support.reply', $ticket), [
+            'message' => 'The client has provided a screenshot of the current error.',
+            'attachments' => [UploadedFile::fake()->image('follow-up.png')],
+        ])->assertSessionHasNoErrors();
+        $this->assertCount(2, $ticket->fresh()->messages);
+        Notification::assertSentOnDemand(\App\Notifications\SupportTicketReply::class);
+
+        $otherPartner = $this->agent();
+        $this->actingAs($otherPartner)->get(route('partner.support.show', $ticket))->assertNotFound();
+        $this->get(route('partner.support.attachments.show', $message->attachments->first()->uuid))->assertForbidden();
+
+        $this->actingAs($partner)->post(route('partner.support.resolve', $ticket))->assertRedirect();
+        $this->assertSame('resolved', $ticket->fresh()->status->value);
+        $this->post(route('partner.support.reply', $ticket), ['message' => 'Please reopen this ticket for further review.'])->assertSessionHasNoErrors();
+        $this->assertSame('open', $ticket->fresh()->status->value);
     }
 
     public function test_customers_are_not_partner_types_and_partner_login_uses_own_dashboard(): void

@@ -76,6 +76,17 @@ final readonly class AdminNotificationService
             $users = $resolved['users'];
             $customers = $resolved['customers'];
             $unreachable = $resolved['unreachable'];
+            if (isset($data['recipient_user_ids'])) {
+                $users = $resolved['users']
+                    ->filter(fn (User $user) => in_array($user->public_id, $data['recipient_user_ids'], true))
+                    ->values();
+                if ($users->count() !== count($data['recipient_user_ids'])) {
+                    throw ValidationException::withMessages(['recipient_user_ids' => 'Selected users must belong to the chosen groups.']);
+                }
+                $customers = collect();
+                $unreachable = 0;
+                $audienceLabel .= ' (selected users)';
+            }
         }
         if ($users->isEmpty() && $customers->isEmpty()) {
             throw ValidationException::withMessages(['audience_identifier' => 'No recipients are reachable with the selected audience and channels.']);

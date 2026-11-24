@@ -17,6 +17,7 @@ use App\Enums\CustomerType;
 use App\Enums\LeadStatus;
 use App\Enums\UserRole;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\UpdateRequesterSupportTicketRequest;
 use App\Models\Customer;
 use App\Models\Invoice;
 use App\Models\Lead;
@@ -434,13 +435,21 @@ class PortalController extends Controller
 
         return Inertia::render('Partner/Support', [
             'tickets' => SupportTicket::whereIn('customer_id', (clone $clients)->select('id'))->with('customer:id,name')->latest()->paginate(20),
-            'customers' => $clients->get(['uuid', 'name']), 'teams' => SupportTeam::where('is_active', true)->get(['uuid', 'name']),
+            'customers' => $clients->get(['uuid', 'name']), 'teams' => SupportTeam::where('is_active', true)->orderBy('sort_order')->orderBy('name')->get(['uuid', 'name']),
         ]);
     }
 
     public function storeSupport(Request $request, SupportTicketService $service)
     {
-        $data = $request->validate(['customer_uuid' => ['required', 'uuid'], 'team_uuid' => ['required', 'uuid', Rule::exists('support_teams', 'uuid')->where('is_active', true)], 'subject' => ['required', 'string', 'min:5', 'max:255'], 'priority' => ['required', Rule::in(['low', 'normal', 'high', 'urgent'])], 'message' => ['required', 'string', 'min:10', 'max:20000']]);
+        $data = $request->validate([
+            'customer_uuid' => ['required', 'uuid'],
+            'team_uuid' => ['required', 'uuid', Rule::exists('support_teams', 'uuid')->where('is_active', true)],
+            'subject' => ['required', 'string', 'min:5', 'max:255'],
+            'priority' => ['required', Rule::in(['low', 'normal', 'high', 'urgent'])],
+            'message' => ['required', 'string', 'min:10', 'max:20000'],
+            'attachments' => ['nullable', 'array', 'max:5'],
+            'attachments.*' => ['required', 'file', 'mimes:pdf,txt,jpg,jpeg,png,webp,zip', 'max:10240'],
+        ]);
         $ticket = $service->create($this->client($request, $data['customer_uuid']), $data, $request->user());
 
         return redirect()->route('partner.support.show', $ticket->uuid);
@@ -453,14 +462,50 @@ class PortalController extends Controller
 
     public function showSupport(Request $request, string $ticket)
     {
-        return Inertia::render('Partner/Ticket', ['ticket' => $this->ticket($request, $ticket)->load(['customer:id,name', 'messages' => fn ($q) => $q->where('is_customer_visible', true)->with('sender:id,name')])]);
+        $ticket = $this->ticket($request, $ticket)->load([
+            'customer:id,uuid,name',
+            'product:id,uuid,name',
+            'team:id,uuid,name',
+            'messages' => fn ($query) => $query->where('is_customer_visible', true)->with(['sender:id,name', 'attachments']),
+        ]);
+        $customer = $ticket->customer;
+        $productIds = $customer->products()->pluck('products.id')->merge(
+            $customer->subscriptions()->whereIn('status', ['pending', 'trial', 'active', 'grace', 'suspended'])->pluck('product_id'),
+        )->unique();
+
+        return Inertia::render('Partner/Ticket', [
+            'ticket' => $ticket,
+            'products' => Product::query()->published()->whereIn('id', $productIds)->get(['uuid', 'name']),
+            'teams' => SupportTeam::query()->where('is_active', true)->orderBy('sort_order')->orderBy('name')->get(['uuid', 'name']),
+        ]);
     }
 
     public function reply(Request $request, string $ticket, SupportTicketService $service)
     {
-        $data = $request->validate(['message' => ['required', 'string', 'min:2', 'max:20000']]);
-        $service->message($this->ticket($request,$ticket),$data['message'],[],$request->user());
+        $data = $request->validate([
+            'message' => ['required', 'string', 'min:2', 'max:20000'],
+            'attachments' => ['nullable', 'array', 'max:5'],
+            'attachments.*' => ['required', 'file', 'mimes:pdf,txt,jpg,jpeg,png,webp,zip', 'max:10240'],
+        ]);
+        $service->message($this->ticket($request, $ticket), $data['message'], $request->file('attachments', []), $request->user());
 
-        return back()->with('success','Reply sent.');
+        return back()->with('success', 'Reply sent.');
+    }
+
+    public function updateSupport(UpdateRequesterSupportTicketRequest $request, SupportTicket $ticket, SupportTicketService $service)
+    {
+        $this->ticket($request, $ticket->uuid);
+        $service->updateByRequester($ticket, $request->validated(), $request->user());
+
+        return back()->with('success', 'Support ticket updated.');
+    }
+
+    public function resolveSupport(Request $request, string $ticket, SupportTicketService $service)
+    {
+        $ticket = $this->ticket($request, $ticket);
+        $this->authorize('resolveByRequester', $ticket);
+        $service->resolveByRequester($ticket, $request->user());
+
+        return back()->with('success', 'Support ticket marked as resolved.');
     }
 }
