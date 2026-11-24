@@ -3,6 +3,7 @@ import PortalLayout from '@/Layouts/PortalLayout.vue';
 import FormErrors from '@/Components/Partner/FormErrors.vue';
 import Pagination from '@/Components/Partner/Pagination.vue';
 import NotificationEditor from '@/Components/Admin/NotificationEditor.vue';
+import NotificationAttachments from '@/Components/NotificationAttachments.vue';
 import { Head, router, useForm } from '@inertiajs/vue3';
 import { onUnmounted, ref, watch } from 'vue';
 
@@ -241,7 +242,7 @@ const submit = () => form.post(route('admin.notifications.store'), {
                         </summary>
                         <div v-if="message.message_format === 'html'" class="notification-message mt-3 text-sm text-slate-600" v-html="message.formatted_message"></div>
                         <p v-else class="mt-3 whitespace-pre-wrap text-sm text-slate-600">{{ message.message }}</p>
-                        <div v-if="message.attachments.length" class="mt-3 flex flex-wrap gap-3"><a v-for="file in message.attachments" :key="file.uuid" :href="route('notifications.attachments.download', file.uuid)" class="text-sm font-semibold text-cyan-700 underline">{{ file.original_name }}</a></div>
+                        <NotificationAttachments :attachments="message.attachments" />
                         <p class="mt-2 text-sm text-slate-500">{{ message.audience_label }} · {{ message.recipient_count }} recipients · {{ message.email_only_count }} email-only · {{ message.unreachable_count }} unreachable · {{ message.channels.join(', ') }} · {{ message.creator?.name || 'Former administrator' }} · {{ new Date(message.created_at).toLocaleString() }}</p>
                     </details>
                     <p v-if="!message.delivery_tracking" class="mt-3 text-sm text-slate-500">Delivery progress is unavailable for this older submission.</p>

@@ -197,15 +197,66 @@ final class AdminNotificationTest extends TestCase
         $this->assertCount(1, $email->getAttachments());
         $this->assertSame('notice.txt', $email->getAttachments()[0]->getFilename());
         $url = route('notifications.attachments.download', $attachment->uuid);
+        $preview = route('notifications.attachments.preview', $attachment->uuid);
         $this->get($url)->assertOk();
+        $this->get($preview)->assertOk()->assertHeader('Content-Type', 'text/plain; charset=UTF-8')
+            ->assertHeader('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'; sandbox")
+            ->assertHeader('X-Frame-Options', 'DENY')
+            ->assertHeader('X-Content-Type-Options', 'nosniff')
+            ->assertHeader('Cache-Control', 'no-store, private')
+            ->assertHeader('Content-Disposition', 'inline; filename=notice.txt');
         $this->actingAs($outsider)->get($url)->assertNotFound();
+        $this->get($preview)->assertNotFound();
         $this->actingAs($recipient)->get(route('notifications.index'))->assertInertia(fn (Assert $page) => $page
             ->where('auth.unread_notifications', 1)
             ->where('notifications.data.0.formatted_message', $message->message)
             ->where('notifications.data.0.attachments.0.uuid', $attachment->uuid)
             ->missing('notifications.data.0.attachments.0.path'));
         $this->get($url)->assertOk()->assertHeader('Cache-Control', 'no-store, private');
+        $this->get($preview)->assertOk();
+        foreach (['application/pdf', 'image/jpeg', 'image/png', 'image/webp'] as $mime) {
+            $attachment->update(['mime_type' => $mime]);
+            $this->get($preview)->assertOk()->assertHeader('Content-Type', $mime);
+        }
+        $attachment->update(['mime_type' => 'text/html']);
+        $this->get($preview)->assertStatus(415);
+        $this->get($url)->assertOk()->assertHeader('Content-Disposition', 'attachment; filename=notice.txt');
+        Storage::disk('local')->delete($attachment->path);
+        $this->get($preview)->assertNotFound();
         $this->get(route('notifications.attachments.download', (string) Str::uuid()))->assertNotFound();
+    }
+
+    public function test_inbox_uses_linked_format_for_older_deliveries_without_guessing_plain_text(): void
+    {
+        $admin = $this->user();
+        $recipient = $this->user('partner');
+        $this->actingAs($admin)->post(route('admin.notifications.store'), [
+            ...$this->payload('user', $recipient->public_id, ['database']),
+            'message_format' => 'html',
+            'message' => '<h2>News</h2><p>Important</p>',
+        ])->assertSessionHasNoErrors();
+        $submission = AdminNotification::firstOrFail();
+        $notification = $recipient->notifications()->firstOrFail();
+        $data = $notification->data;
+        unset($data['context']['message_format']);
+        $data['message'] = '<h2>News</h2><script>alert(1)</script><p>Important</p>';
+        $notification->update(['data' => $data]);
+
+        $this->actingAs($recipient)->get(route('notifications.index'))->assertInertia(fn (Assert $page) => $page
+            ->where('notifications.data.0.formatted_message', '<h2>News</h2><p>Important</p>'));
+
+        $data['context']['message_format'] = 'plain';
+        $notification->update(['data' => $data]);
+        $this->get(route('notifications.index'))->assertInertia(fn (Assert $page) => $page
+            ->missing('notifications.data.0.formatted_message')
+            ->where('notifications.data.0.data.message', $data['message']));
+
+        unset($data['context']['message_format']);
+        $notification->update(['data' => $data]);
+        $submission->update(['message_format' => 'plain']);
+        $this->get(route('notifications.index'))->assertInertia(fn (Assert $page) => $page
+            ->missing('notifications.data.0.formatted_message')
+            ->where('notifications.data.0.data.message', $data['message']));
     }
 
     public function test_notification_formatting_and_attachment_validation_and_templates(): void

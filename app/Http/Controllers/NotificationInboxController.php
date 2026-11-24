@@ -17,7 +17,7 @@ final class NotificationInboxController extends Controller
         $notifications->getCollection()->each(function ($notification) use ($messages, $formatter): void {
             $data = $notification->data;
             $message = $messages->get(data_get($data, 'context.admin_notification_uuid'));
-            if ($message && data_get($data, 'context.message_format') === 'html') {
+            if ($message && data_get($data, 'context.message_format', $message->message_format) === 'html') {
                 $notification->setAttribute('formatted_message', $formatter->sanitize($data['message'], 'html'));
             }
             $notification->setAttribute('attachments', $message?->attachments ?? []);
