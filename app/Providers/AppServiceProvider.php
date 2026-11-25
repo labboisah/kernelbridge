@@ -67,7 +67,6 @@ class AppServiceProvider extends ServiceProvider
             URL::forceScheme('https');
         }
 
-        Gate::before(fn ($user): ?bool => $user->hasRole(UserRole::SuperAdmin->value) ? true : null);
         app(BusinessLifecycleNotifications::class)->register();
         foreach ([Customer::class, Product::class, Plan::class, Quotation::class, Invoice::class, Payment::class, Subscription::class, SoftwareLicense::class, ApiClient::class, ApiClientCredential::class, Role::class, Permission::class] as $model) {
             $model::observe(SecurityAuditObserver::class);

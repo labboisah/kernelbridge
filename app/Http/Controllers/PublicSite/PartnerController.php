@@ -59,7 +59,7 @@ class PartnerController extends Controller
 
     public function photo(Request $request, PartnerApplication $application)
     {
-        abort_unless($application->user_id === $request->user()->id || $request->user()->hasAnyRole(['admin', 'super_admin']), 403);
+        abort_unless($application->user_id === $request->user()->id || $request->user()->can('partner.manage'), 403);
         abort_unless($application->photo_path && Storage::disk('local')->exists($application->photo_path), 404);
 
         return Storage::disk('local')->response($application->photo_path, null, [

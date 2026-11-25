@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers\Auth;
 
-use App\Enums\UserRole;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Auth\LoginRequest;
 use Illuminate\Http\RedirectResponse;
@@ -34,11 +33,13 @@ class AuthenticatedSessionController extends Controller
 
         $request->session()->regenerate();
 
-        $destination = $request->user()->hasAnyRole([UserRole::Sales->value, UserRole::Finance->value, UserRole::Support->value]) ? 'staff.dashboard' : ($request->user()->hasAnyRole([UserRole::SuperAdmin->value, UserRole::Admin->value]) ? 'admin.dashboard' : 'dashboard');
+        $user = $request->user();
+        $destination = $user->can('admin.dashboard')
+            ? 'admin.dashboard'
+            : ($user->can('staff.dashboard')
+                ? 'staff.dashboard'
+                : ($user->isPartner() && $user->can('partner.dashboard') ? 'partner.dashboard' : 'dashboard'));
 
-        if ($destination === 'dashboard' && $request->user()->isPartner()) {
-            $destination = 'partner.dashboard';
-        }
         return redirect()->intended(route($destination));
     }
 

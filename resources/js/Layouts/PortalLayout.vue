@@ -10,12 +10,12 @@ import DropdownLink from '@/Components/DropdownLink.vue';
 
 const props = defineProps({ area: { type: String, required: true } });
 const navigationOpen = ref(false);
-const isAdmin = props.area === 'Administration';
-const roles = computed(() => usePage().props.auth.roles || []);
-const isStaff = computed(() => roles.value.some(role => ['sales', 'finance', 'support'].includes(role)) && !roles.value.some(role => ['super_admin', 'admin'].includes(role)));
-const showAdminAccountMenu = computed(() => isAdmin && roles.value.some(role => ['super_admin', 'admin'].includes(role)));
+const permissions = computed(() => usePage().props.auth.permissions || []);
+const isAdmin = computed(() => permissions.value.includes('admin.dashboard'));
+const isStaff = computed(() => permissions.value.includes('staff.dashboard') && !permissions.value.includes('admin.dashboard'));
+const showAdminAccountMenu = computed(() => isAdmin && permissions.value.includes('admin.dashboard'));
 const showAccountMenu = computed(() => showAdminAccountMenu.value || !isStaff.value);
-const photoUrl = computed(() => showAdminAccountMenu.value ? usePage().props.auth.admin_photo_url : usePage().props.auth.partner_photo_url);
+const photoUrl = computed(() => permissions.value.includes('admin.profile.manage') ? usePage().props.auth.admin_photo_url : usePage().props.auth.partner_photo_url);
 const photoFailed = ref(false);
 watch(photoUrl, () => { photoFailed.value = false; });
 </script>

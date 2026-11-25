@@ -191,7 +191,10 @@ final class AccessControlController extends Controller
         $before = $role->permissions()->orderBy('name')->pluck('name')->all();
         $permissionIds = collect($data['permission_ids'])->map(fn ($id): int => (int) $id);
         if (in_array($role->name, [UserRole::SuperAdmin->value, UserRole::Admin->value], true)) {
-            $permissionIds = $permissionIds->merge(Permission::query()->where('guard_name', 'web')->whereIn('name', ['access.manage', 'staff.manage'])->pluck('id'));
+            $requiredPermissions = $role->name === UserRole::SuperAdmin->value
+                ? ['access.manage', 'staff.manage']
+                : ['staff.manage'];
+            $permissionIds = $permissionIds->merge(Permission::query()->where('guard_name', 'web')->whereIn('name', $requiredPermissions)->pluck('id'));
         }
         $permissions = Permission::query()->where('guard_name', 'web')->whereIn('id', $permissionIds->unique())->get();
 

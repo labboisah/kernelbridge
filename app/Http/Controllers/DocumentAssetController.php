@@ -15,7 +15,7 @@ final class DocumentAssetController extends Controller
 {
     public function update(Request $request, string $kind, FileScanner $scanner, AuditRecorder $audit): RedirectResponse
     {
-        abort_unless($request->user()->hasAnyRole(['admin', 'super_admin']), 403);
+        abort_unless($request->user()->can('admin.profile.manage'), 403);
         $request->validate(['asset' => ['required', 'image', 'mimes:jpg,jpeg,png', 'max:2048']]);
         $scanner->assertClean($request->file('asset'));
         $path = $request->file('asset')->store('document-assets', 'local');
@@ -47,7 +47,7 @@ final class DocumentAssetController extends Controller
 
     public function destroy(Request $request, string $kind, AuditRecorder $audit): RedirectResponse
     {
-        abort_unless($request->user()->hasAnyRole(['admin', 'super_admin']), 403);
+        abort_unless($request->user()->can('admin.profile.manage'), 403);
         $oldPath = DB::transaction(function () use ($kind, $request, $audit): ?string {
             $column = $kind.'_path';
             $settings = DB::table('document_assets')->where('id', 1)->lockForUpdate()->first();

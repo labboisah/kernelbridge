@@ -4,6 +4,7 @@ namespace App\Http\Middleware;
 
 use App\Models\PartnerApplication;
 use Illuminate\Http\Request;
+use Inertia\Inertia;
 use Inertia\Middleware;
 
 class HandleInertiaRequests extends Middleware
@@ -32,40 +33,53 @@ class HandleInertiaRequests extends Middleware
     {
         return [
             ...parent::share($request),
-            'auth' => [
-                'user' => $request->user(),
-                'admin_photo_url' => fn (): ?string => $request->user()?->admin_photo_path
-                    && $request->user()->hasAnyRole(['admin', 'super_admin'])
-                        ? route('profile.photo', ['v' => substr(hash('sha256', $request->user()->admin_photo_path), 0, 16)])
-                        : null,
-                'partner_photo_url' => function () use ($request): ?string {
-                    if (! $request->user()) {
-                        return null;
+            'auth' => Inertia::always(function () use ($request): array {
+                $user = $request->user();
+                if ($user) {
+                    foreach (['roles', 'permissions', 'temporaryPermissions'] as $relation) {
+                        $user->unsetRelation($relation);
                     }
-                    $application = PartnerApplication::query()->where('user_id', $request->user()->id)
-                        ->whereNotNull('photo_path')->latest('updated_at')->orderByDesc('id')->first(['id']);
+                }
 
-                    return $application ? route('partners.photo', $application) : null;
-                },
-                'is_partner' => fn (): bool => $request->user()?->isPartner() ?? false,
-                'approved_agent' => fn (): bool => $request->user()?->isApprovedAgent() ?? false,
-                'partner_category' => fn (): ?string => $request->user()?->isApprovedAgent()
-                    ? PartnerApplication::where('user_id', $request->user()->id)->where('type', 'sales_agent')->value('partner_category')
-                    : null,
-                'partner_applications' => fn (): array => $request->user()?->isPartner()
-                    ? PartnerApplication::where('user_id', $request->user()->id)
-                        ->get(['type', 'status'])
-                        ->map(fn (PartnerApplication $application): array => [
-                            'type' => $application->type,
-                            'label' => config("partners.{$application->type}.label"),
-                            'status' => $application->status,
-                        ])
-                        ->all()
-                    : [],
-                'roles' => fn (): array => $request->user()?->getRoleNames()->all() ?? [],
-                'permissions' => fn (): array => $request->user()?->getAllPermissions()->pluck('name')->all() ?? [],
-                'unread_notifications' => fn (): int => $request->user()?->unreadNotifications()->count() ?? 0,
-            ],
+                return [
+                    'user' => $user,
+                    'admin_photo_url' => fn (): ?string => $user?->admin_photo_path
+                        && $user->can('admin.profile.manage')
+                            ? route('profile.photo', ['v' => substr(hash('sha256', $user->admin_photo_path), 0, 16)])
+                            : null,
+                    'partner_photo_url' => function () use ($user): ?string {
+                        if (! $user) {
+                            return null;
+                        }
+                        $application = PartnerApplication::query()->where('user_id', $user->id)
+                            ->whereNotNull('photo_path')->latest('updated_at')->orderByDesc('id')->first(['id']);
+
+                        return $application ? route('partners.photo', $application) : null;
+                    },
+                    'is_partner' => fn (): bool => $user?->isPartner() ?? false,
+                    'approved_agent' => fn (): bool => $user?->isApprovedAgent() ?? false,
+                    'partner_category' => fn (): ?string => $user?->isApprovedAgent()
+                        ? PartnerApplication::where('user_id', $user->id)->where('type', 'sales_agent')->value('partner_category')
+                        : null,
+                    'partner_applications' => fn (): array => $user?->isPartner()
+                        ? PartnerApplication::query()->where('user_id', $user->id)
+                            ->get(['type', 'status'])
+                            ->map(fn (PartnerApplication $application): array => [
+                                'type' => $application->type,
+                                'label' => config("partners.{$application->type}.label"),
+                                'status' => $application->status,
+                            ])
+                            ->all()
+                        : [],
+                    'roles' => fn (): array => $user?->getRoleNames()->all() ?? [],
+                    'permissions' => fn (): array => $user
+                        ? $user->getAllPermissions()
+                            ->merge($user->temporaryPermissions)
+                            ->pluck('name')->unique()->values()->all()
+                        : [],
+                    'unread_notifications' => fn (): int => $user?->unreadNotifications()->count() ?? 0,
+                ];
+            }),
             'flash' => [
                 'success' => fn (): ?string => $request->session()->get('success'),
                 'error' => fn (): ?string => $request->session()->get('error'),

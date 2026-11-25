@@ -8,9 +8,9 @@ import { computed } from 'vue';
 
 defineProps({ notifications: Object });
 const page = usePage();
-const roles = computed(() => page.props.auth.roles || []);
-const administration = computed(() => roles.value.some(role => ['super_admin', 'admin'].includes(role)));
-const staff = computed(() => roles.value.some(role => ['sales', 'finance', 'support'].includes(role)));
+const permissions = computed(() => page.props.auth.permissions || []);
+const administration = computed(() => permissions.value.includes('admin.dashboard'));
+const staff = computed(() => permissions.value.includes('staff.dashboard') && !administration.value);
 const partner = computed(() => !administration.value && !staff.value && page.props.auth.is_partner);
 const layout = computed(() => partner.value ? PartnerLayout : PortalLayout);
 const area = computed(() => administration.value ? 'Administration' : staff.value ? 'Staff Workspace' : 'Customer portal');

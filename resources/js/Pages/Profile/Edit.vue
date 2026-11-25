@@ -18,7 +18,7 @@ defineProps({
     },
     documentAssets: Object,
 });
-const isAdmin = computed(() => usePage().props.auth.roles?.some(role => ['admin', 'super_admin'].includes(role)));
+const isAdmin = computed(() => usePage().props.auth.permissions?.includes('admin.profile.manage'));
 </script>
 
 <template>

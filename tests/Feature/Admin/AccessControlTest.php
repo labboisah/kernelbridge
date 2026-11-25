@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Admin;
 
+use App\Domain\Access\SystemPermissionCatalog;
 use App\Enums\UserRole;
 use App\Models\User;
 use Database\Seeders\RoleAndPermissionSeeder;
@@ -18,6 +19,37 @@ final class AccessControlTest extends TestCase
     {
         parent::setUp();
         $this->seed(RoleAndPermissionSeeder::class);
+    }
+
+    public function test_seeded_database_matches_system_permission_catalog_and_preserves_custom_entries(): void
+    {
+        $customRole = Role::create(['name' => 'custom_analyst', 'guard_name' => 'web']);
+        $customPermission = Permission::create(['name' => 'custom.report.export', 'guard_name' => 'web']);
+        $customRole->givePermissionTo($customPermission);
+        $this->seed(RoleAndPermissionSeeder::class);
+
+        $catalog = SystemPermissionCatalog::names();
+        $databasePermissions = Permission::query()->where('guard_name', 'web')->pluck('name')->all();
+        $expectedPermissions = [...$catalog, 'custom.report.export'];
+        sort($catalog);
+        sort($databasePermissions);
+        sort($expectedPermissions);
+        $this->assertSame($expectedPermissions, $databasePermissions);
+
+        foreach (SystemPermissionCatalog::rolePermissions() as $roleName => $expectedPermissions) {
+            $actualRolePermissions = Role::findByName($roleName, 'web')->permissions()->pluck('name')->all();
+            sort($expectedPermissions);
+            sort($actualRolePermissions);
+            $this->assertSame($expectedPermissions, $actualRolePermissions, "Unexpected permission grants for {$roleName}.");
+        }
+
+        $this->assertTrue($customRole->fresh()->hasPermissionTo($customPermission));
+        $this->assertTrue(Role::findByName(UserRole::SuperAdmin->value, 'web')->hasPermissionTo('access.manage'));
+        $this->assertFalse(Role::findByName(UserRole::Admin->value, 'web')->hasPermissionTo('access.manage'));
+        $this->assertFalse(Role::findByName(UserRole::Agent->value, 'web')->hasPermissionTo('partner.manage'));
+        $this->assertFalse(Role::findByName(UserRole::Agent->value, 'web')->hasPermissionTo('partner.commission.manage'));
+        $this->assertFalse(Role::findByName(UserRole::Customer->value, 'web')->hasPermissionTo('support.view'));
+        $this->assertTrue(Role::findByName(UserRole::Customer->value, 'web')->hasPermissionTo('portal.support.view'));
     }
 
     public function test_access_control_screens_are_separate_and_super_admin_only(): void
@@ -44,13 +76,60 @@ final class AccessControlTest extends TestCase
         $this->get(route('admin.access-control.permissions'))->assertOk()
             ->assertInertia(fn ($page) => $page->component('Admin/AccessControl/Permissions'));
         $this->get(route('admin.access-control.permissions', ['search' => 'support.reply']))
-            ->assertInertia(fn ($page) => $page->where('permissions.data.0.name', 'support.reply'));
+            ->assertInertia(fn ($page) => $page->where('permissions.data', fn ($permissions) => $permissions->contains(fn ($permission) => $permission['name'] === 'support.reply')));
         $this->get(route('admin.access-control.role-permissions'))->assertOk()
             ->assertInertia(fn ($page) => $page->component('Admin/AccessControl/RolePermissions'));
         $this->get(route('admin.access-control.user-roles'))->assertOk()
             ->assertInertia(fn ($page) => $page->component('Admin/AccessControl/UserRoles'));
         $this->get(route('admin.access-control.user-permissions'))->assertOk()
             ->assertInertia(fn ($page) => $page->component('Admin/AccessControl/UserPermissions'));
+    }
+
+    public function test_account_routes_are_authorized_by_database_permissions(): void
+    {
+        $customer = User::factory()->create(['status' => 'active']);
+        $customer->assignRole(UserRole::Customer->value);
+
+        $this->actingAs($customer)->get(route('dashboard'))
+            ->assertOk()
+            ->assertInertia(fn ($page) => $page->where('auth.permissions', fn ($permissions) => $permissions->contains('portal.dashboard')));
+        $this->get(route('admin.dashboard'))->assertForbidden();
+        $this->get(route('profile.edit'))->assertOk();
+    }
+
+    public function test_role_permission_revocation_refreshes_sidebar_props_and_route_authorization(): void
+    {
+        $customer = User::factory()->create(['status' => 'active']);
+        $customer->assignRole(UserRole::Customer->value);
+        $customer->load('roles.permissions');
+        $this->assertTrue($customer->can('portal.services.view'));
+
+        $role = Role::findByName(UserRole::Customer->value, 'web');
+        $dashboardPermission = Permission::findByName('portal.dashboard', 'web');
+        $superAdmin = $this->superAdmin();
+        $this->actingAs($superAdmin)->put(route('admin.access-control.role-permissions.update', $role), [
+            'permission_ids' => [$dashboardPermission->id],
+        ])->assertRedirect();
+
+        $version = app(\App\Http\Middleware\HandleInertiaRequests::class)->version(request());
+        $dashboard = $this->actingAs($customer)->withHeaders([
+            'X-Inertia' => 'true',
+            'X-Inertia-Version' => $version,
+        ])->get(route('dashboard'));
+        $dashboard->assertOk()
+            ->assertJsonPath('props.auth.permissions', fn ($permissions) => in_array('portal.dashboard', $permissions, true)
+                && ! in_array('portal.services.view', $permissions, true));
+
+        $this->withHeaders([
+            'X-Inertia' => 'true',
+            'X-Inertia-Version' => $version,
+            'X-Inertia-Partial-Component' => 'Customer/Dashboard',
+            'X-Inertia-Partial-Data' => 'summary',
+        ])->get(route('dashboard'))
+            ->assertOk()
+            ->assertJsonPath('props.auth.permissions', fn ($permissions) => ! in_array('portal.services.view', $permissions, true));
+
+        $this->get(route('portal.services.index'))->assertForbidden();
     }
 
     public function test_super_admin_can_manage_custom_roles_and_permissions_but_not_system_entries(): void
@@ -98,7 +177,7 @@ final class AccessControlTest extends TestCase
         $this->put(route('admin.access-control.role-permissions.update', $adminRole), [
             'permission_ids' => [(int) Permission::findByName('customer.view', 'web')->id],
         ])->assertRedirect();
-        $this->assertTrue($adminRole->fresh()->hasPermissionTo('access.manage'));
+        $this->assertFalse($adminRole->fresh()->hasPermissionTo('access.manage'));
         $this->assertTrue($adminRole->fresh()->hasPermissionTo('staff.manage'));
 
         $user = User::factory()->create(['name' => 'Access Managed User', 'status' => 'active']);
@@ -119,30 +198,37 @@ final class AccessControlTest extends TestCase
     {
         $superAdmin = $this->superAdmin();
         $user = User::factory()->create(['name' => 'Temporary Permission Target', 'status' => 'active']);
-        $user->assignRole(UserRole::Customer->value);
         $permission = Permission::findByName('support.note', 'web');
+        $profilePermission = Permission::findByName('profile.manage', 'web');
         $expiresAt = now()->addHour();
 
         $this->actingAs($superAdmin)->put(route('admin.access-control.user-permissions.update', $user->public_id), [
             'grants' => [[
                 'permission_id' => $permission->id,
                 'expires_at' => $expiresAt->toDateTimeString(),
+            ], [
+                'permission_id' => $profilePermission->id,
+                'expires_at' => $expiresAt->toDateTimeString(),
             ]],
         ])->assertRedirect();
 
         $this->assertTrue($user->fresh()->can('support.note'));
+        $this->actingAs($user)->get(route('profile.edit'))->assertOk();
         $this->assertDatabaseHas('temporary_user_permissions', [
             'user_id' => $user->id,
             'permission_id' => $permission->id,
             'granted_by' => $superAdmin->id,
         ]);
+        $this->actingAs($superAdmin);
         $this->get(route('admin.access-control.user-permissions', ['search' => 'Temporary Permission Target']))
             ->assertInertia(fn ($page) => $page
                 ->where('users.data.0.temporary_permission_grants.0.permission.name', 'support.note'));
 
         $this->travelTo($expiresAt->copy()->addMinute());
         $this->assertFalse($user->fresh()->can('support.note'));
+        $this->actingAs($user->fresh())->get(route('profile.edit'))->assertForbidden();
 
+        $this->actingAs($superAdmin);
         $this->delete(route('admin.access-control.user-permissions.destroy', $user->public_id))->assertRedirect();
         $this->assertDatabaseMissing('temporary_user_permissions', ['user_id' => $user->id]);
     }

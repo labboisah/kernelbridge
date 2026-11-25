@@ -4,6 +4,7 @@ use App\Http\Middleware\AddApiSecurityHeaders;
 use App\Http\Middleware\AddSecurityHeaders;
 use App\Http\Middleware\AssignApiRequestId;
 use App\Http\Middleware\AuthenticateApiClient;
+use App\Http\Middleware\DatabasePermissionMiddleware;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\EnsureApiClientScope;
 use App\Http\Middleware\LimitApiClientRequests;
@@ -16,7 +17,6 @@ use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Middleware\AddLinkHeadersForPreloadedAssets;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
-use Spatie\Permission\Middleware\PermissionMiddleware;
 use Spatie\Permission\Middleware\RoleMiddleware;
 use Spatie\Permission\Middleware\RoleOrPermissionMiddleware;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
@@ -33,7 +33,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->statefulApi();
         $middleware->alias([
             'role' => RoleMiddleware::class,
-            'permission' => PermissionMiddleware::class,
+            'permission' => DatabasePermissionMiddleware::class,
             'role_or_permission' => RoleOrPermissionMiddleware::class,
             'api.request_id' => AssignApiRequestId::class,
             'api.security' => AddApiSecurityHeaders::class,

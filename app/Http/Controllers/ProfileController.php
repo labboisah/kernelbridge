@@ -20,7 +20,7 @@ class ProfileController extends Controller
 {
     public function photo(Request $request)
     {
-        abort_unless($request->user()->hasAnyRole(['admin', 'super_admin']), 403);
+        abort_unless($request->user()->can('admin.profile.manage'), 403);
         $path = $request->user()->admin_photo_path;
         abort_unless($path && Storage::disk('local')->exists($path), 404);
 
@@ -33,7 +33,7 @@ class ProfileController extends Controller
 
     public function updatePhoto(Request $request): RedirectResponse
     {
-        abort_unless($request->user()->hasAnyRole(['admin', 'super_admin']), 403);
+        abort_unless($request->user()->can('admin.profile.manage'), 403);
         $request->validate(['photo' => ['required', 'image', 'mimes:jpg,jpeg,png', 'max:2048']]);
         $newPhoto = $request->file('photo')->store('admin-photos', 'local');
         if ($newPhoto === false) {
@@ -69,7 +69,7 @@ class ProfileController extends Controller
         return Inertia::render('Profile/Edit', [
             'mustVerifyEmail' => $request->user() instanceof MustVerifyEmail,
             'status' => session('status'),
-            'documentAssets' => $request->user()->hasAnyRole(['admin', 'super_admin']) ? $assets->images() : null,
+            'documentAssets' => $request->user()->can('admin.profile.manage') ? $assets->images() : null,
         ]);
     }
 

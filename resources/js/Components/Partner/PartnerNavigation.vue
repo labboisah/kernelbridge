@@ -5,13 +5,14 @@ import NavigationIcon from '@/Components/NavigationIcon.vue';
 
 const page = usePage();
 const partnerApplications = computed(() => page.props.auth.partner_applications || []);
+const permissions = computed(() => page.props.auth.permissions || []);
 const groups = [
-    { label: 'Workspace', icon: 'overview', links: [['overview', 'partner.dashboard', 'Overview', 'partner.dashboard']] },
-    { label: 'Onboarding', icon: 'customers', links: [['pcr', 'partner.pcr.index', 'PCR register', 'partner.pcr.*'], ['leads', 'partner.crm.index', 'CRM pipeline', 'partner.crm.*'], ['quotations', 'partner.quotations.index', 'Quotation', 'partner.quotations.*']] },
-    { label: 'Client', icon: 'customers', links: [['customers', 'partner.customers', 'Clients', 'partner.customers*'], ['subscriptions', 'partner.subscriptions', 'Subscription', 'partner.subscriptions'], ['payments', 'partner.payments', 'Payment', 'partner.payments'], ['invoices', 'partner.invoices', 'Invoice', 'partner.invoices*'], ['licenses', 'partner.activation-codes', 'Activation code', 'partner.activation-codes']] },
-    { label: 'Finance', icon: 'payments', links: [['commission', 'partner.commission', 'Commission', 'partner.commission'], ['nrs-commission', 'partner.nrs-commission', 'NRS Commission', 'partner.nrs-commission'], ['effort-points', 'partner.effort-points', 'Effort Points', 'partner.effort-points']] },
-    { label: 'Support', icon: 'support', links: [['support', 'partner.support', 'Support', 'partner.support*']] },
-    { label: 'Account', icon: 'profile', links: [['profile', 'profile.edit', 'Login & profile', 'profile.*']] },
+    { label: 'Workspace', icon: 'overview', links: [['overview', 'partner.dashboard', 'Overview', 'partner.dashboard', null, 'partner.dashboard']] },
+    { label: 'Onboarding', icon: 'customers', links: [['pcr', 'partner.pcr.index', 'PCR register', 'partner.pcr.*', null, 'partner.pcr.view'], ['leads', 'partner.crm.index', 'CRM pipeline', 'partner.crm.*', null, 'partner.crm.view'], ['quotations', 'partner.quotations.index', 'Quotation', 'partner.quotations.*', null, 'partner.quotation.view']] },
+    { label: 'Client', icon: 'customers', links: [['customers', 'partner.customers', 'Clients', 'partner.customers*', null, 'partner.client.view'], ['subscriptions', 'partner.subscriptions', 'Subscription', 'partner.subscriptions', null, 'partner.subscription.view'], ['payments', 'partner.payments', 'Payment', 'partner.payments', null, 'partner.payment.view'], ['invoices', 'partner.invoices', 'Invoice', 'partner.invoices*', null, 'partner.invoice.view'], ['licenses', 'partner.activation-codes', 'Activation code', 'partner.activation-codes', null, 'partner.license.view']] },
+    { label: 'Finance', icon: 'payments', links: [['commission', 'partner.commission', 'Commission', 'partner.commission', null, 'partner.commission.view'], ['nrs-commission', 'partner.nrs-commission', 'NRS Commission', 'partner.nrs-commission', null, 'partner.network-commission.view'], ['effort-points', 'partner.effort-points', 'Effort Points', 'partner.effort-points', null, 'partner.effort-points.view']] },
+    { label: 'Support', icon: 'support', links: [['support', 'partner.support', 'Support', 'partner.support*', null, 'portal.support.view']] },
+    { label: 'Account', icon: 'profile', links: [['profile', 'profile.edit', 'Login & profile', 'profile.*', null, 'profile.manage']] },
 ];
 
 const linksForGroup = group => {
@@ -24,16 +25,18 @@ const linksForGroup = group => {
             partnerApplications.value.length === 1 ? 'My application' : `My ${application.label.toLowerCase()} application`,
             'partners.onboarding',
             { type: application.type },
+            'partner.application',
         ]),
         ...(page.props.auth.approved_agent && page.props.auth.partner_category === 'individual'
-            ? [['organization-upgrade', 'partner.organization-upgrade', 'Upgrade to organization', 'partner.organization-upgrade']]
+            ? [['organization-upgrade', 'partner.organization-upgrade', 'Upgrade to organization', 'partner.organization-upgrade', null, 'partner.organization.manage']]
             : []),
-        ...(page.props.auth.approved_agent ? [['bank-details', 'partner.bank.edit', 'Bank details', 'partner.bank.*']] : []),
+        ...(page.props.auth.approved_agent ? [['bank-details', 'partner.bank.edit', 'Bank details', 'partner.bank.*', null, 'partner.bank.manage']] : []),
         ...group.links,
     ];
 };
 const visibleLinks = group => linksForGroup(group).filter(link =>
-    ['overview', 'profile'].includes(link[0]) || link[1] === 'partners.onboarding' || page.props.auth.approved_agent,
+    (!link[5] || permissions.value.includes(link[5]))
+    && (['overview', 'profile'].includes(link[0]) || link[1] === 'partners.onboarding' || page.props.auth.approved_agent),
 );
 const isActive = link => route().current(link[3], link[4]);
 const isGroupActive = group => visibleLinks(group).some(isActive);

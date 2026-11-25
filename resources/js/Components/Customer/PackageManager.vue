@@ -42,7 +42,7 @@ const money = value => new Intl.NumberFormat('en-NG', { style: 'currency', curre
             <div v-if="unpriced.length" class="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm">
                 <p><strong>Some packages need a price before they can be added.</strong> {{ unpriced.map(item => item.name).join(', ') }}.</p>
                 <p class="mt-2">An administrator must set a positive price in {{ order.currency }} with the {{ order.billing_cycle }} billing period under Products &gt; MediFlow &gt; Plans, prices &amp; features. Refresh this page after the price is saved.</p>
-                <Link v-if="$page.props.auth.roles.some(role => ['admin', 'super_admin'].includes(role))" :href="route('admin.products.plans.index', 'mediflow')" class="mt-2 inline-block font-bold text-cyan-800 underline">Set package prices</Link>
+                <Link v-if="$page.props.auth.permissions.includes('plan.view')" :href="route('admin.products.plans.index', 'mediflow')" class="mt-2 inline-block font-bold text-cyan-800 underline">Set package prices</Link>
                 <Link v-else :href="route('contact')" class="mt-2 inline-block font-bold text-cyan-800 underline">Request package pricing</Link>
             </div>
             <p v-if="!available.length" class="mb-4 text-amber-800">No packages match this subscription's currency and billing period. Contact support to configure compatible plans.</p>

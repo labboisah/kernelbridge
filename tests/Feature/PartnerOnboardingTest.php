@@ -35,6 +35,14 @@ class PartnerOnboardingTest extends TestCase
         return ['action' => 'submit', 'organisation' => 'Example', 'phone' => '+2348000000000', 'location' => 'Lagos, Nigeria', 'details' => 'Interested in working together.', 'consent' => true];
     }
 
+    private function applicant(): User
+    {
+        $user = User::factory()->create();
+        $user->assignRole('customer');
+
+        return $user;
+    }
+
     public function test_public_choices_and_registration_continue_to_selected_onboarding(): void
     {
         $this->get('/partners')->assertOk()->assertInertia(fn (Assert $page) => $page->component('Public/Partners')->has('types', 3));
@@ -49,7 +57,7 @@ class PartnerOnboardingTest extends TestCase
     public function test_each_type_can_submit_and_view_application(): void
     {
         foreach (array_keys(config('partners')) as $type) {
-            $user = User::factory()->create();
+            $user = $this->applicant();
             $url = route('partners.onboarding', $type);
             $this->actingAs($user)->post($url, $this->submission() + ['user_id' => 999, 'status' => 'approved'])->assertRedirect($url);
             $this->assertDatabaseHas('partner_applications', ['user_id' => $user->id, 'type' => $type, 'status' => 'submitted']);
@@ -63,7 +71,7 @@ class PartnerOnboardingTest extends TestCase
 
     public function test_partner_can_only_view_saved_draft_and_cannot_start_another_application(): void
     {
-        $user = User::factory()->create();
+        $user = $this->applicant();
         $url = route('partners.onboarding', 'developer');
         $this->actingAs($user)->post($url, ['action' => 'save', 'details' => 'Draft'])->assertRedirect($url);
 
@@ -100,7 +108,7 @@ class PartnerOnboardingTest extends TestCase
 
     public function test_admin_can_edit_application_details_without_changing_review_or_consent(): void
     {
-        $applicant = User::factory()->create();
+        $applicant = $this->applicant();
         $this->actingAs($applicant)->post('/partners/developer/onboarding', $this->submission())->assertRedirect();
         $application = PartnerApplication::firstOrFail();
         $consentedAt = $application->consented_at;
@@ -176,15 +184,15 @@ class PartnerOnboardingTest extends TestCase
 
     public function test_submission_requires_contact_details_and_consent(): void
     {
-        $this->actingAs(User::factory()->create())->post('/partners/investor/onboarding', ['action' => 'submit'])->assertSessionHasErrors(['phone', 'location', 'details', 'consent']);
+        $this->actingAs($this->applicant())->post('/partners/investor/onboarding', ['action' => 'submit'])->assertSessionHasErrors(['phone', 'location', 'details', 'consent']);
         $this->assertDatabaseCount('partner_applications', 0);
     }
 
     public function test_authentication_and_application_isolation(): void
     {
         $this->get('/partners/developer/onboarding')->assertRedirect('/login');
-        $first = User::factory()->create();
-        $second = User::factory()->create();
+        $first = $this->applicant();
+        $second = $this->applicant();
         $this->actingAs($first)->post('/partners/developer/onboarding', $this->submission());
         $this->actingAs($second)->get('/partners/developer/onboarding')->assertInertia(fn (Assert $p) => $p->where('application', null));
         $this->get('/partners/administrator/onboarding')->assertNotFound();
@@ -193,7 +201,7 @@ class PartnerOnboardingTest extends TestCase
 
     public function test_guided_responses_are_visible_to_applicant_and_admin(): void
     {
-        $user = User::factory()->create();
+        $user = $this->applicant();
         $answers = [
             'background_areas' => ['Healthcare', 'Software and technology'],
             'digital_skills' => ['Email and internet', 'Technical support'],
@@ -231,7 +239,7 @@ class PartnerOnboardingTest extends TestCase
 
     public function test_guided_answers_reject_invalid_values_and_unknown_questions(): void
     {
-        $this->actingAs(User::factory()->create());
+        $this->actingAs($this->applicant());
         $url = '/partners/developer/onboarding';
         $this->post($url, ['action' => 'save', 'guided_answers' => '{'])->assertSessionHasErrors('guided_answers');
         $this->post($url, ['action' => 'save', 'guided_answers' => json_encode(['experience_level' => 'Expert plus', 'installation_experience' => 'Maybe', 'digital_skills' => ['Invalid']], JSON_THROW_ON_ERROR)])
@@ -244,7 +252,7 @@ class PartnerOnboardingTest extends TestCase
     public function test_only_admin_can_review_and_decision_is_visible_to_owner(): void
     {
         Notification::fake();
-        $user = User::factory()->create();
+        $user = $this->applicant();
         $user->assignRole('customer');
         $this->actingAs($user)->post('/partners/sales_agent/onboarding', $this->submission());
         $application = PartnerApplication::firstOrFail();
@@ -269,7 +277,7 @@ class PartnerOnboardingTest extends TestCase
     public function test_rejected_application_does_not_send_approval_or_allow_bank_details(): void
     {
         Notification::fake();
-        $user = User::factory()->create();
+        $user = $this->applicant();
         $this->actingAs($user)->post('/partners/developer/onboarding', $this->submission());
         $application = PartnerApplication::firstOrFail();
         $this->get(route('partner.bank.edit'))->assertForbidden();
@@ -284,7 +292,7 @@ class PartnerOnboardingTest extends TestCase
     public function test_approval_queues_an_email_for_the_applicant(): void
     {
         Queue::fake();
-        $user = User::factory()->create();
+        $user = $this->applicant();
         $this->actingAs($user)->post('/partners/investor/onboarding', $this->submission());
         $application = PartnerApplication::firstOrFail();
         $admin = User::factory()->create();
@@ -300,7 +308,7 @@ class PartnerOnboardingTest extends TestCase
     public function test_approved_partner_bank_details_are_encrypted_and_restricted_to_owner_and_admin(): void
     {
         Notification::fake();
-        $user = User::factory()->create();
+        $user = $this->applicant();
         $this->actingAs($user)->post('/partners/developer/onboarding', $this->submission());
         $application = PartnerApplication::firstOrFail();
         $admin = User::factory()->create();
@@ -327,7 +335,7 @@ class PartnerOnboardingTest extends TestCase
     public function test_experience_and_private_photo_are_saved_and_only_owner_or_admin_can_view_photo(): void
     {
         Storage::fake('local');
-        $user = User::factory()->create();
+        $user = $this->applicant();
         $photo = UploadedFile::fake()->createWithContent(
             'photo.png',
             base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lE8AAAAASUVORK5CYII='),

@@ -23,7 +23,7 @@ final class AdminNotificationAttachmentController extends Controller
     {
         $attachment->load('notification');
         $message = $attachment->notification;
-        $allowed = $request->user()->hasAnyRole(['admin', 'super_admin'])
+        $allowed = $request->user()->can('notification.manage')
             || $request->user()->notifications()->where('data->context->admin_notification_uuid', $message->uuid)->exists();
         abort_unless($allowed, 404);
         abort_unless(Storage::disk('local')->exists($attachment->path), 404);
