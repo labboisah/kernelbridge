@@ -137,6 +137,14 @@ const sendInvitation = client => invitation.post(route('partner.customers.invita
                             <div><dt class="inline font-semibold">Products: </dt><dd class="inline">{{ client.products?.map(product => product.name).join(', ') || 'Not specified' }}</dd></div>
                         </dl>
                     </details>
+                    <div v-if="client.crm_leads?.length" class="mt-3 text-sm">
+                        <p class="font-semibold text-slate-700">CRM records</p>
+                        <div class="mt-1 flex flex-wrap gap-x-3 gap-y-1">
+                            <Link v-for="lead in client.crm_leads" :key="lead.uuid" :href="route('partner.crm.show', lead.uuid)" class="font-semibold text-cyan-700 underline">
+                                {{ lead.lead_number }} · {{ lead.organization || lead.name }} ({{ lead.status.replaceAll('_', ' ') }})
+                            </Link>
+                        </div>
+                    </div>
                 </div>
                 <div class="flex flex-wrap gap-4">
                     <Link :href="route('partner.customers.subscriptions.create', client.uuid)" class="rounded-lg bg-[#0B3D6E] px-4 py-2 font-semibold text-white">Add subscription</Link>

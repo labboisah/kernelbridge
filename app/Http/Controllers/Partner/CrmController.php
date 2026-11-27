@@ -3,10 +3,11 @@
 namespace App\Http\Controllers\Partner;
 
 use App\Domain\Partners\PartnerPointsService;
-use App\Enums\LeadStatus;
 use App\Domain\Sales\Services\LeadConversionService;
+use App\Enums\LeadStatus;
 use App\Http\Controllers\Controller;
 use App\Models\Lead;
+use App\Models\PartnerClientInvitation;
 use App\Models\Product;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
@@ -35,16 +36,32 @@ final class CrmController extends Controller
     public function show(Request $request, string $lead)
     {
         $lead = $this->leads($request)
-            ->select(['id', 'uuid', 'lead_number', 'name', 'organization', 'email', 'phone', 'location', 'organization_type', 'number_of_users', 'product_id', 'follow_up_date', 'status'])
+            ->select(['id', 'uuid', 'lead_number', 'name', 'organization', 'email', 'phone', 'location', 'organization_type', 'number_of_users', 'product_id', 'follow_up_date', 'status', 'converted_customer_id'])
             ->where('uuid', $lead)
-            ->with(['stageHistory:id,lead_id,status,entered_at', 'convertedCustomer:id,uuid,customer_number,name'])
+            ->with(['stageHistory:id,lead_id,status,entered_at', 'convertedCustomer:id,uuid,customer_number,name,email'])
             ->firstOrFail();
+        $customer = $lead->convertedCustomer;
+        $clientHasPortalAccess = $customer !== null
+            && filled($customer->email)
+            && $customer->users()->whereRaw('LOWER(users.email) = ?', [mb_strtolower($customer->email)])->exists();
+        $registrationInvitationPending = $customer !== null
+            && PartnerClientInvitation::query()
+                ->where('customer_id', $customer->id)
+                ->whereNull('accepted_at')
+                ->where('expires_at', '>', now())
+                ->exists();
 
         return Inertia::render('Partner/Crm/Show', [
             'lead' => $lead,
             'statuses' => array_column(LeadStatus::cases(), 'value'),
             'nextStatus' => $lead->status->next()?->value,
             'products' => Product::published()->get(['id', 'name']),
+            'canContinueRegistration' => $customer !== null
+                && filled($customer->email)
+                && ! $clientHasPortalAccess
+                && $request->user()->can('partner.client.invite'),
+            'clientHasPortalAccess' => $clientHasPortalAccess,
+            'registrationInvitationPending' => $registrationInvitationPending,
         ]);
     }
 

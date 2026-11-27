@@ -117,7 +117,12 @@ class PortalController extends Controller
     {
         return Inertia::render('Partner/Customers', [
             'customers' => $this->clients($request)
-                ->with(['products:id,name', 'contacts:id,customer_id,name,job_title,is_primary'])
+                ->with([
+                    'products:id,name',
+                    'contacts:id,customer_id,name,job_title,is_primary',
+                    'crmLeads' => fn ($query) => $query->where('partner_user_id', $request->user()->id)
+                        ->select(['id', 'uuid', 'lead_number', 'name', 'organization', 'status', 'converted_customer_id']),
+                ])
                 ->latest()->paginate(20),
             'products' => Product::published()->get(['id', 'name']),
         ]);

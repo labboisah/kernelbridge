@@ -3,7 +3,7 @@ import PartnerLayout from '@/Layouts/PartnerLayout.vue';
 import FormErrors from '@/Components/Partner/FormErrors.vue';
 import { Link, useForm } from '@inertiajs/vue3';
 
-const props = defineProps({ lead: Object, statuses: Array, nextStatus: String, products: Array });
+const props = defineProps({ lead: Object, statuses: Array, nextStatus: String, products: Array, canContinueRegistration: Boolean, clientHasPortalAccess: Boolean, registrationInvitationPending: Boolean });
 const details = useForm({
     name: props.lead.name,
     organization: props.lead.organization || '',
@@ -16,11 +16,13 @@ const details = useForm({
     follow_up_date: props.lead.follow_up_date ? props.lead.follow_up_date.slice(0, 10) : '',
 });
 const stage = useForm({ status: '' });
+const registration = useForm({});
 const label = status => status.replaceAll('_', ' ');
 const advance = status => {
     stage.status = status;
     stage.put(route('partner.crm.advance', props.lead.uuid), { preserveScroll: true });
 };
+const continueRegistration = () => registration.post(route('partner.customers.invitation', props.lead.converted_customer.uuid), { preserveScroll: true });
 </script>
 
 <template>
@@ -41,9 +43,20 @@ const advance = status => {
                         <button type="button" class="rounded-lg border border-red-300 px-4 py-2 font-bold text-red-700" :disabled="stage.processing" @click="advance('lost')">Mark lost</button>
                     </div>
                     <p v-else class="mt-4 text-sm text-slate-600">This opportunity is closed. Contact the sales team if it needs to be reopened.</p>
-                    <div v-if="lead.converted_customer" class="mt-5 rounded-lg bg-emerald-50 p-4 text-emerald-900">
-                        <p class="font-semibold">Added to your clients as {{ lead.converted_customer.customer_number }}.</p>
-                        <Link :href="route('partner.customers')" class="mt-2 inline-block font-bold underline">View clients</Link>
+                    <div v-if="lead.status === 'won' && lead.converted_customer" class="mt-5 rounded-lg bg-emerald-50 p-4 text-emerald-900">
+                        <p class="font-semibold">Opportunity won and linked to client {{ lead.converted_customer.customer_number }}.</p>
+                        <p class="mt-1 text-sm">Client: {{ lead.converted_customer.name }} · {{ lead.converted_customer.email || 'No email address' }}</p>
+                        <p v-if="clientHasPortalAccess" class="mt-3 text-sm">This client already has portal access.</p>
+                        <p v-else-if="!lead.converted_customer.email" class="mt-3 text-sm">Add an email address to the client record before continuing registration.</p>
+                        <p v-else-if="!canContinueRegistration" class="mt-3 text-sm">You do not have permission to send client invitations.</p>
+                        <FormErrors :errors="registration.errors" />
+                        <div class="mt-3 flex flex-wrap gap-3">
+                            <button v-if="canContinueRegistration" type="button" class="rounded-lg bg-emerald-800 px-4 py-2 font-bold text-white disabled:opacity-50" :disabled="registration.processing" @click="continueRegistration">
+                                {{ registrationInvitationPending ? 'Resend registration invitation' : 'Continue client registration' }}
+                            </button>
+                            <Link :href="route('partner.customers.subscriptions.create', lead.converted_customer.uuid)" class="rounded-lg border border-emerald-800 px-4 py-2 font-bold text-emerald-900">Set up subscription</Link>
+                            <Link :href="route('partner.customers')" class="rounded-lg px-4 py-2 font-bold underline">View clients</Link>
+                        </div>
                     </div>
                 </section>
                 <section class="rounded-2xl bg-white p-6">

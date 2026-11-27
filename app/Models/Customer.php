@@ -38,6 +38,11 @@ final class Customer extends Model
         return $this->belongsTo(User::class, 'assigned_to');
     }
 
+    public function crmLeads(): HasMany
+    {
+        return $this->hasMany(Lead::class, 'converted_customer_id')->latest();
+    }
+
     public function contacts(): HasMany
     {
         return $this->hasMany(CustomerContact::class)->orderByDesc('is_primary')->orderBy('name');

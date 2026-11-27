@@ -10,6 +10,7 @@ use App\Models\User;
 use Database\Seeders\RoleAndPermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Notification;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
 
@@ -107,6 +108,24 @@ final class PartnerCrmTest extends TestCase
         $this->assertDatabaseCount('lead_stage_history', 8);
         $this->assertDatabaseHas('customers', ['id' => $lead->fresh()->converted_customer_id, 'partner_user_id' => $agent->id]);
         $this->assertDatabaseHas('customers', ['id' => $lead->fresh()->converted_customer_id, 'name' => 'Acme']);
+
+        $convertedLead = $lead->fresh();
+        $customer = $convertedLead->convertedCustomer;
+        $this->assertTrue($customer->crmLeads()->whereKey($convertedLead->id)->exists());
+        $this->get(route('partner.crm.show', $convertedLead->uuid))->assertInertia(fn (Assert $page) => $page
+            ->where('lead.converted_customer.uuid', $customer->uuid)
+            ->where('canContinueRegistration', true)
+            ->where('clientHasPortalAccess', false));
+
+        Notification::fake();
+        $this->post(route('partner.customers.invitation', $customer->uuid))->assertRedirect();
+        $this->assertDatabaseHas('partner_client_invitations', [
+            'customer_id' => $customer->id,
+            'email' => $customer->email,
+            'accepted_at' => null,
+        ]);
+        $this->get(route('partner.customers'))->assertInertia(fn (Assert $page) => $page
+            ->where('customers.data.0.crm_leads.0.uuid', $convertedLead->uuid));
     }
 
     public function test_staff_status_changes_are_recorded_and_owner_survives_reassignment(): void
