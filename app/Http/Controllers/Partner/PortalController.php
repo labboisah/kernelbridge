@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Partner;
 
 use App\Domain\Audit\Contracts\AuditRecorder;
 use App\Domain\Customers\Services\CustomerManager;
+use App\Domain\Documents\DocumentAssets;
 use App\Domain\Finance\Services\FlutterwavePaymentService;
 use App\Domain\Finance\Services\InvoiceManager;
 use App\Domain\Finance\Services\PaymentManager;
@@ -341,9 +342,17 @@ class PortalController extends Controller
         return redirect()->route('partner.invoices.show', $invoice->uuid)->with('success', 'Invoice created at the published plan price.');
     }
 
-    public function showInvoice(Request $request, string $invoice)
+    public function showInvoice(Request $request, string $invoice, DocumentAssets $assets)
     {
-        return Inertia::render('Partner/Invoice', ['invoice' => $this->invoice($request, $invoice)->load(['customer:id,name,email', 'items'])]);
+        $invoice = $this->invoice($request, $invoice)->load(['customer:id,name,billing_address', 'items', 'payments']);
+
+        return Inertia::render('Partner/Invoice', [
+            'invoice' => $invoice,
+            'documentAssets' => $assets->images(),
+            'canPayOnline' => filled(config('services.flutterwave.secret_key'))
+                && in_array($invoice->status->value, ['issued', 'partially_paid', 'overdue'], true)
+                && (float) $invoice->balance > 0,
+        ]);
     }
 
     public function pay(Request $request, string $invoice, FlutterwavePaymentService $service)

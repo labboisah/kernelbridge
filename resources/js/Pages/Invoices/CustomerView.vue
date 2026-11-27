@@ -1,14 +1,17 @@
 <script setup>
 import DocumentMarks from '@/Components/DocumentMarks.vue';
-import { Head, Link, router } from '@inertiajs/vue3';
-const props = defineProps({ clientSetup: { type: Object, default: null }, availableCredit: { type: String, default: '0.00' }, invoice: Object, documentAssets: Object, canPayOnline: { type: Boolean, default: false }, portal: { type: Boolean, default: false } });
-const pay = () => router.post(route('portal.invoices.pay-online', props.invoice.uuid));
+import FormErrors from '@/Components/Partner/FormErrors.vue';
+import { Head, Link, router, useForm } from '@inertiajs/vue3';
+const props = defineProps({ clientSetup: { type: Object, default: null }, availableCredit: { type: String, default: '0.00' }, invoice: Object, documentAssets: Object, canPayOnline: { type: Boolean, default: false }, portal: { type: Boolean, default: false }, partner: { type: Boolean, default: false } });
+const manual = useForm({ amount: props.invoice.balance, payment_method: 'bank_transfer', transaction_reference: '', payment_date: new Date().toLocaleDateString('en-CA') });
+const pay = () => router.post(route(props.partner ? 'partner.invoices.pay' : 'portal.invoices.pay-online', props.invoice.uuid));
 </script>
 <template>
     <Head :title="invoice.invoice_number" />
     <main class="min-h-screen bg-slate-100 p-4 sm:p-10">
         <div class="mx-auto mb-4 flex max-w-4xl flex-wrap justify-end gap-3 print:hidden">
             <Link v-if="portal" :href="route('portal.invoices.index')" class="rounded-xl border border-slate-300 bg-white px-5 py-3 font-bold text-[#0B3D6E]">Back to invoices</Link>
+            <Link v-if="partner" :href="route('partner.invoices')" class="rounded-xl border border-slate-300 bg-white px-5 py-3 font-bold text-[#0B3D6E]">Back to invoices</Link>
             <Link v-if="portal && invoice.status === 'paid'" :href="route('portal.licenses.index')" class="rounded-xl bg-cyan-700 px-5 py-3 font-bold text-white">Activation codes</Link>
             <Link v-if="portal && Number(invoice.balance) > 0" :href="route('portal.payments.create')" class="rounded-xl border border-slate-300 bg-white px-5 py-3 font-bold text-slate-800">Submit payment proof</Link>
             <button v-if="portal && Number(availableCredit) > 0 && Number(invoice.balance) > 0" type="button" class="rounded-xl border border-cyan-700 bg-white px-5 py-3 font-bold text-cyan-800" @click="router.post(route('portal.invoices.credit', invoice.uuid))">Apply credit ({{ invoice.currency }} {{ availableCredit }})</button>
@@ -17,7 +20,7 @@ const pay = () => router.post(route('portal.invoices.pay-online', props.invoice.
         </div>
         <p v-if="$page.props.flash.success" class="success-message mx-auto mb-4 max-w-4xl">{{ $page.props.flash.success }}</p>
         <p v-if="$page.props.errors.payment || $page.props.errors.invoice" role="alert" class="mx-auto mb-4 max-w-4xl text-red-700">{{ $page.props.errors.payment || $page.props.errors.invoice }}</p>
-        <section v-if="clientSetup?.activation_ready" class="mx-auto mb-6 max-w-4xl rounded-2xl bg-emerald-50 p-6 print:hidden">
+        <section v-if="!partner && clientSetup?.activation_ready" class="mx-auto mb-6 max-w-4xl rounded-2xl bg-emerald-50 p-6 print:hidden">
             <h2 class="text-xl font-bold">Payment confirmed: generate your installation code</h2>
             <p class="mt-3">Generate a one-time installation code from your activation codes page. It will be shown once and expires after 24 hours.</p>
             <div class="mt-4 flex flex-wrap gap-3">
@@ -28,7 +31,7 @@ const pay = () => router.post(route('portal.invoices.pay-online', props.invoice.
             </div>
             <p v-if="clientSetup.archive?.sha256" class="mt-3 break-all text-xs text-emerald-900">Archive SHA-256: {{ clientSetup.archive.sha256 }}</p>
         </section>
-        <section v-else-if="clientSetup?.license_key" class="mx-auto mb-6 max-w-4xl rounded-2xl bg-emerald-50 p-6 print:hidden">
+        <section v-else-if="!partner && clientSetup?.license_key" class="mx-auto mb-6 max-w-4xl rounded-2xl bg-emerald-50 p-6 print:hidden">
             <h2 class="text-xl font-bold">Payment confirmed: activate your service</h2>
             <p class="mt-3">Legacy license key: <code class="break-all font-bold">{{ clientSetup.license_key }}</code></p>
             <p class="mt-3 text-sm">Enter this legacy key in the licensing screen for applications configured for legacy key activation.</p>
@@ -66,5 +69,17 @@ const pay = () => router.post(route('portal.invoices.pay-online', props.invoice.
             <DocumentMarks :assets="documentAssets" />
             <p class="mt-12 text-center text-sm text-slate-500">Thank you for choosing KernelBridge Technologies.</p>
         </article>
+        <form v-if="partner && ['issued', 'partially_paid', 'overdue'].includes(invoice.status)" class="form-card mx-auto mt-6 max-w-4xl print:hidden" @submit.prevent="manual.post(route('partner.payments.store', invoice.uuid), { preserveScroll: true, onSuccess: () => manual.reset('transaction_reference') })">
+            <h2 class="text-xl font-bold">Submit an offline payment</h2>
+            <p class="text-sm text-slate-600">Finance must verify this payment before it settles the invoice or earns commission.</p>
+            <FormErrors :errors="manual.errors" />
+            <div class="form-grid">
+                <label>Amount<input v-model="manual.amount" type="number" min="0.01" step="0.01" :max="invoice.balance" required /></label>
+                <label>Method<select v-model="manual.payment_method"><option value="bank_transfer">Bank transfer</option><option value="cash">Cash</option><option value="pos">POS</option></select></label>
+                <label>Transaction reference<input v-model="manual.transaction_reference" required maxlength="255" /></label>
+                <label>Payment date<input v-model="manual.payment_date" type="date" required /></label>
+            </div>
+            <button class="form-button" :disabled="manual.processing">Submit for verification</button>
+        </form>
     </main>
 </template>

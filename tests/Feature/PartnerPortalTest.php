@@ -369,6 +369,13 @@ class PartnerPortalTest extends TestCase
         ]);
         $invoice = Invoice::firstOrFail();
         $response->assertRedirect(route('partner.invoices.show', $invoice->uuid));
+        $this->actingAs($agent)->get(route('partner.invoices.show', $invoice->uuid))
+            ->assertInertia(fn (Assert $page) => $page->component('Partner/Invoice')
+                ->where('invoice.invoice_number', $invoice->invoice_number)
+                ->where('invoice.customer.name', $client->name)
+                ->has('invoice.items', 1)
+                ->has('invoice.payments', 0)
+                ->has('documentAssets'));
         $this->assertDatabaseHas('subscriptions', [
             'customer_id' => $client->id, 'product_id' => $interests[0]->id,
             'plan_id' => $selectedPlan->id, 'status' => 'pending', 'invoice_id' => $invoice->id,
