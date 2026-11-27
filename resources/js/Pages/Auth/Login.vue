@@ -37,6 +37,10 @@ const submit = () => {
             {{ status }}
         </div>
 
+        <p class="mb-4 text-sm text-slate-600">
+            After your password is confirmed, we’ll email you a six-digit verification code.
+        </p>
+
         <form @submit.prevent="submit">
             <div>
                 <InputLabel for="email" value="Email" />

@@ -7,7 +7,9 @@ use App\Domain\Customers\Services\CustomerManager;
 use App\Domain\Finance\Services\FlutterwavePaymentService;
 use App\Domain\Finance\Services\InvoiceManager;
 use App\Domain\Finance\Services\PaymentManager;
+use App\Domain\Licensing\Services\InstallationActivationService;
 use App\Domain\Licensing\Services\PackagePurchaseService;
+use App\Domain\Partners\PartnerClientNotifications;
 use App\Domain\Partners\PartnerQualificationService;
 use App\Domain\Partners\ClientInvitationService;
 use App\Domain\Subscriptions\Services\SubscriptionService;
@@ -35,6 +37,7 @@ use App\Models\Subscription;
 use App\Models\SupportTeam;
 use App\Models\SupportTicket;
 use App\Notifications\PartnerClientRegistered;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
@@ -212,9 +215,63 @@ class PortalController extends Controller
     {
         return Inertia::render('Partner/Subscriptions', [
             'subscriptions' => Subscription::whereIn('customer_id', $this->clients($request)->select('id'))
-                ->with(['customer:id,name', 'product:id,name', 'plan:id,name'])
-                ->latest()->paginate(20, ['id', 'uuid', 'customer_id', 'product_id', 'plan_id', 'subscription_number', 'status', 'starts_at', 'ends_at']),
+                ->with(['customer:id,name,email', 'product:id,name,licensing_mode', 'plan:id,name', 'invoice:id,status,balance',
+                    'license:id,subscription_id,status', 'license.activationCodes:id,software_license_id,status,created_at'])
+                ->latest()->paginate(20, ['id', 'uuid', 'customer_id', 'product_id', 'plan_id', 'invoice_id', 'subscription_number', 'status', 'starts_at', 'ends_at'])
+                ->through(fn (Subscription $subscription) => [
+                    'uuid' => $subscription->uuid,
+                    'customer' => ['name' => $subscription->customer->name],
+                    'product' => ['name' => $subscription->product->name],
+                    'plan' => ['name' => $subscription->plan->name],
+                    'subscription_number' => $subscription->subscription_number,
+                    'status' => $subscription->status->value,
+                    'starts_at' => $subscription->starts_at?->toIso8601String(),
+                    'ends_at' => $subscription->ends_at?->toIso8601String(),
+                    'can_generate_activation_code' => in_array($subscription->status->value, ['active', 'grace'], true)
+                        && $subscription->invoice?->status->value === 'paid'
+                        && (float) $subscription->invoice->balance === 0.0
+                        && $subscription->license?->status === 'active'
+                        && in_array($subscription->product->licensing_mode, ['direct', 'hybrid'], true)
+                        && filled($subscription->customer->email),
+                    'has_issued_activation_code' => $subscription->license?->activationCodes->contains(fn (LicenseActivationCode $code) => $code->status === 'issued') ?? false,
+                ]),
         ]);
+    }
+
+    public function resendActivationCode(
+        Request $request,
+        Subscription $subscription,
+        InstallationActivationService $activation,
+        PartnerClientNotifications $notifications,
+    ): RedirectResponse {
+        $this->clients($request)->whereKey($subscription->customer_id)->firstOrFail();
+        $subscription->load(['customer', 'product', 'invoice', 'license.activationCodes']);
+
+        if (! in_array($subscription->status->value, ['active', 'grace'], true)
+            || $subscription->invoice?->status->value !== 'paid'
+            || (float) $subscription->invoice->balance !== 0.0
+            || $subscription->license?->status !== 'active'
+            || ! in_array($subscription->product->licensing_mode, ['direct', 'hybrid'], true)) {
+            throw ValidationException::withMessages(['activation_code' => 'A paid, active subscription with a direct or hybrid license is required.']);
+        }
+
+        if (! filled($subscription->customer->email)) {
+            throw ValidationException::withMessages(['activation_code' => 'Add a client email address before sending an activation code.']);
+        }
+
+        $unusedCode = $subscription->license->activationCodes
+            ->where('status', 'issued')
+            ->sortByDesc('created_at')
+            ->first();
+        $issued = $activation->issueCode($subscription->license, $request->user(), $unusedCode?->uuid);
+        $notifications->activationCode(
+            $subscription,
+            $issued['code'],
+            $issued['activation_code']->expires_at,
+            $unusedCode !== null,
+        );
+
+        return back()->with('success', 'A fresh activation code was generated and queued for the client. Any unused previous code was invalidated.');
     }
 
     public function activationCodes(Request $request)

@@ -2,12 +2,12 @@
 
 namespace App\Http\Controllers\Auth;
 
+use App\Domain\Identity\Services\EmailLoginChallengeService;
 use App\Domain\Identity\Services\RegisterCustomer;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Auth\StoreRegisteredUserRequest;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Http\RedirectResponse;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -27,16 +27,15 @@ class RegisteredUserController extends Controller
      *
      * @throws ValidationException
      */
-    public function store(StoreRegisteredUserRequest $request, RegisterCustomer $registerCustomer): RedirectResponse
+    public function store(StoreRegisteredUserRequest $request, RegisterCustomer $registerCustomer, EmailLoginChallengeService $challenges): RedirectResponse
     {
         $user = $registerCustomer->execute($request->validated());
 
         event(new Registered($user));
 
-        Auth::login($user);
-        $request->session()->regenerate();
+        $challenges->begin($user, $request);
         $request->session()->forget('partner_registration');
 
-        return redirect()->intended(route('dashboard', absolute: false));
+        return redirect()->route('login.two-factor');
     }
 }

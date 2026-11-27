@@ -132,7 +132,10 @@ class PartnerPortalTest extends TestCase
     {
         $this->get('/partners/customer/register')->assertNotFound();
         $user = $this->agent('draft', 'developer');
-        $this->post('/login', ['email' => $user->email, 'password' => 'password'])->assertRedirect(route('partner.dashboard'));
+        $this->post('/login', ['email' => $user->email, 'password' => 'password'])
+            ->assertRedirect(route('login.two-factor'));
+        $this->verifyLoginCode($user)->assertRedirect(route('partner.dashboard'));
+        $this->assertAuthenticatedAs($user);
         $this->get('/partner')->assertOk()->assertInertia(fn (Assert $p) => $p->component('Partner/Dashboard')
             ->where('canManageClients', false)
             ->where('auth.partner_photo_url', null)

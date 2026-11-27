@@ -6,6 +6,7 @@ use App\Enums\UserRole;
 use App\Models\User;
 use Database\Seeders\RoleAndPermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Notification;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
 
@@ -30,9 +31,12 @@ final class StaffDashboardTest extends TestCase
 
     public function test_staff_login_redirects_to_staff_workspace(): void
     {
+        Notification::fake();
         $staff = User::factory()->create(['password' => 'password']);
         $staff->assignRole(UserRole::Finance->value);
 
-        $this->post(route('login'), ['email' => $staff->email, 'password' => 'password'])->assertRedirect(route('staff.dashboard'));
+        $this->post(route('login'), ['email' => $staff->email, 'password' => 'password'])
+            ->assertRedirect(route('login.two-factor'));
+        $this->verifyLoginCode($staff)->assertRedirect(route('staff.dashboard'));
     }
 }

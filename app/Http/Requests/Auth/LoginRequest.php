@@ -2,6 +2,8 @@
 
 namespace App\Http\Requests\Auth;
 
+use App\Models\User;
+use Illuminate\Auth\Events\Failed;
 use Illuminate\Auth\Events\Lockout;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
@@ -38,11 +40,15 @@ class LoginRequest extends FormRequest
      *
      * @throws ValidationException
      */
-    public function authenticate(): void
+    public function authenticate(): User
     {
         $this->ensureIsNotRateLimited();
 
-        if (! Auth::attempt([...$this->only('email', 'password'), 'status' => 'active'], $this->boolean('remember'))) {
+        $credentials = [...$this->only('email', 'password'), 'status' => 'active'];
+        $guard = Auth::guard('web');
+
+        if (! $guard->validate($credentials)) {
+            event(new Failed('web', $guard->getLastAttempted(), $credentials));
             RateLimiter::hit($this->throttleKey());
 
             throw ValidationException::withMessages([
@@ -51,6 +57,12 @@ class LoginRequest extends FormRequest
         }
 
         RateLimiter::clear($this->throttleKey());
+        $user = $guard->getLastAttempted();
+        if (! $user instanceof User) {
+            throw new \LogicException('The web authentication provider must return a user model.');
+        }
+
+        return $user;
     }
 
     /**

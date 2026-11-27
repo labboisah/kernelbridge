@@ -17,6 +17,7 @@ class RegistrationTest extends TestCase
     {
         parent::setUp();
         $this->seed(RoleAndPermissionSeeder::class);
+        Notification::fake();
     }
 
     public function test_registration_screen_can_be_rendered(): void
@@ -37,16 +38,17 @@ class RegistrationTest extends TestCase
             'password_confirmation' => 'password',
         ]);
 
+        $this->assertGuest();
+        $response->assertRedirect(route('login.two-factor'));
+        $this->verifyLoginCode(User::where('email', 'test@example.com')->firstOrFail())
+            ->assertRedirect(route('dashboard', absolute: false));
         $this->assertAuthenticated();
-        $response->assertRedirect(route('dashboard', absolute: false));
         $this->assertDatabaseHas('customers', ['email' => 'test@example.com', 'phone' => '+2348000000000', 'type' => 'individual', 'status' => 'prospect']);
         $this->assertDatabaseHas('customer_user', ['is_primary' => true]);
     }
 
     public function test_registration_sends_a_verification_email_and_blocks_unverified_access(): void
     {
-        Notification::fake();
-
         $this->post('/register', [
             'name' => 'Verify Me', 'account_type' => 'individual', 'phone' => '+2348000000001',
             'email' => 'verify@example.com', 'password' => 'password', 'password_confirmation' => 'password',
@@ -55,6 +57,7 @@ class RegistrationTest extends TestCase
         $user = User::where('email', 'verify@example.com')->firstOrFail();
         $this->assertNull($user->email_verified_at);
         Notification::assertSentTo($user, VerifyEmail::class);
+        $this->verifyLoginCode($user)->assertRedirect(route('dashboard', absolute: false));
         $this->get('/dashboard')->assertRedirect(route('verification.notice'));
         $this->get('/account/services')->assertRedirect(route('verification.notice'));
     }
@@ -65,7 +68,9 @@ class RegistrationTest extends TestCase
             'name' => 'Ada Admin', 'account_type' => 'organization', 'organization' => 'ABC Academy',
             'email' => 'ada@academy.test', 'phone' => '+2348111111111',
             'password' => 'password', 'password_confirmation' => 'password',
-        ])->assertRedirect(route('dashboard', absolute: false));
+        ])->assertRedirect(route('login.two-factor'));
+        $this->verifyLoginCode(User::where('email', 'ada@academy.test')->firstOrFail())
+            ->assertRedirect(route('dashboard', absolute: false));
 
         $this->assertDatabaseHas('customers', ['name' => 'ABC Academy', 'email' => 'ada@academy.test', 'type' => 'organization']);
     }

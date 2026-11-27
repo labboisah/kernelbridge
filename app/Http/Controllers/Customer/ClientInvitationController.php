@@ -3,13 +3,13 @@
 namespace App\Http\Controllers\Customer;
 
 use App\Domain\Audit\Contracts\AuditRecorder;
+use App\Domain\Identity\Services\EmailLoginChallengeService;
 use App\Enums\UserRole;
 use App\Http\Controllers\Controller;
 use App\Models\Customer;
 use App\Models\PartnerClientInvitation;
 use App\Models\User;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rules\Password;
 use Illuminate\Validation\ValidationException;
@@ -51,7 +51,7 @@ final class ClientInvitationController extends Controller
         ])->toResponse($request)->header('Cache-Control', 'no-store')->header('Referrer-Policy', 'no-referrer');
     }
 
-    public function accept(Request $request, string $token, AuditRecorder $audit)
+    public function accept(Request $request, string $token, AuditRecorder $audit, EmailLoginChallengeService $challenges)
     {
         $invitation = $this->invitation($token);
         $user = $request->user();
@@ -86,8 +86,9 @@ final class ClientInvitationController extends Controller
         });
 
         if (! $request->user()) {
-            Auth::login($user);
-            $request->session()->regenerate();
+            $challenges->begin($user, $request, destination: route('portal.services.index', absolute: false));
+
+            return redirect()->route('login.two-factor');
         }
 
         return redirect()->route('portal.services.index')->with('success', 'Your customer account is linked.');

@@ -2,12 +2,15 @@
 
 namespace App\Http\Controllers\Auth;
 
+use App\Domain\Identity\Services\EmailLoginChallengeService;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Auth\LoginRequest;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -29,18 +32,16 @@ class AuthenticatedSessionController extends Controller
      */
     public function store(LoginRequest $request): RedirectResponse
     {
-        $request->authenticate();
+        $user = $request->authenticate();
+        $key = 'login-email-code-send:'.$user->id;
+        if (RateLimiter::tooManyAttempts($key, 3)) {
+            throw ValidationException::withMessages(['email' => 'Too many verification code requests. Please try again later.']);
+        }
+        RateLimiter::hit($key, 900);
 
-        $request->session()->regenerate();
+        app(EmailLoginChallengeService::class)->begin($user, $request, $request->boolean('remember'));
 
-        $user = $request->user();
-        $destination = $user->can('admin.dashboard')
-            ? 'admin.dashboard'
-            : ($user->can('staff.dashboard')
-                ? 'staff.dashboard'
-                : ($user->isPartner() && $user->can('partner.dashboard') ? 'partner.dashboard' : 'dashboard'));
-
-        return redirect()->intended(route($destination));
+        return redirect()->route('login.two-factor');
     }
 
     /**

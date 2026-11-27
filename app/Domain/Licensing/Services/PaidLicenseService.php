@@ -33,9 +33,20 @@ final readonly class PaidLicenseService
                     continue;
                 }
                 $subscription = $this->subscriptions->activate($subscription, $invoice, $actor);
-                $this->licenses->issue($subscription, 1);
+                $issued = $this->licenses->issue($subscription, 1);
+                $activationCode = null;
+                $subscription->loadMissing('customer');
+                if ($subscription->customer->partner_user_id
+                    && filled($subscription->customer->email)
+                    && in_array($issued['license']->product()->value('licensing_mode'), ['direct', 'hybrid'], true)) {
+                    $activationCode = app(InstallationActivationService::class)->issueCode($issued['license'], $actor);
+                }
                 app(ClientSetupService::class)->provision($subscription, $actor);
-                app(PartnerClientNotifications::class)->installation($subscription);
+                app(PartnerClientNotifications::class)->installation(
+                    $subscription,
+                    $activationCode['code'] ?? null,
+                    $activationCode['activation_code']->expires_at ?? null,
+                );
             }
         });
     }

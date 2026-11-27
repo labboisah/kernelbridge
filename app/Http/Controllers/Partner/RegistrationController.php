@@ -2,19 +2,19 @@
 
 namespace App\Http\Controllers\Partner;
 
+use App\Domain\Identity\Services\EmailLoginChallengeService;
 use App\Enums\UserRole;
 use App\Http\Controllers\Controller;
 use App\Models\PartnerApplication;
 use App\Models\User;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rules\Password;
 
 class RegistrationController extends Controller
 {
-    public function store(Request $request, string $type)
+    public function store(Request $request, string $type, EmailLoginChallengeService $challenges)
     {
         abort_unless(array_key_exists($type, config('partners')), 404);
         $data = $request->validate(['name' => ['required', 'string', 'max:255'], 'email' => ['required', 'string', 'lowercase', 'email', 'max:255', 'unique:users,email'], 'password' => ['required', 'confirmed', Password::defaults()]]);
@@ -27,10 +27,9 @@ class RegistrationController extends Controller
         });
         event(new Registered($user));
 
-        Auth::login($user);
-        $request->session()->regenerate();
+        $challenges->begin($user, $request, destination: route('partners.onboarding', $type, absolute: false));
         $request->session()->forget(['url.intended', 'partner_registration']);
 
-        return redirect()->route('partners.onboarding', $type);
+        return redirect()->route('login.two-factor');
     }
 }

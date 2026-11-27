@@ -45,9 +45,13 @@ class PartnerOnboardingTest extends TestCase
 
     public function test_public_choices_and_registration_continue_to_selected_onboarding(): void
     {
+        Notification::fake();
         $this->get('/partners')->assertOk()->assertInertia(fn (Assert $page) => $page->component('Public/Partners')->has('types', 3));
         $this->get('/partners/developer/register')->assertOk()->assertInertia(fn (Assert $page) => $page->component('Partner/Register')->where('category.label', 'Developer'));
-        $this->post('/partners/developer/register', ['name' => 'New Partner', 'email' => 'partner@example.test', 'account_type' => 'individual', 'password' => 'password', 'password_confirmation' => 'password'])->assertRedirect(route('partners.onboarding', 'developer'));
+        $this->post('/partners/developer/register', ['name' => 'New Partner', 'email' => 'partner@example.test', 'account_type' => 'individual', 'password' => 'password', 'password_confirmation' => 'password'])->assertRedirect(route('login.two-factor'));
+        $user = User::where('email', 'partner@example.test')->firstOrFail();
+        $this->verifyLoginCode($user)->assertRedirect(route('partners.onboarding', 'developer'));
+        $this->assertAuthenticatedAs($user);
         $this->assertAuthenticated();
         $this->assertTrue(auth()->user()->hasRole('partner'));
         $this->assertFalse(auth()->user()->customers()->exists());

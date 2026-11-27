@@ -104,7 +104,9 @@ class CheckoutTest extends TestCase
         auth()->logout();
         $url = route('portal.checkout.show', ['packages' => [$this->plan->uuid]]);
         $this->get($url)->assertRedirect(route('login'));
-        $this->post('/login', ['email' => $this->owner->email, 'password' => 'password'])->assertRedirect($url);
+        $this->post('/login', ['email' => $this->owner->email, 'password' => 'password'])
+            ->assertRedirect(route('login.two-factor'));
+        $this->verifyLoginCode($this->owner)->assertRedirect($url);
     }
 
     public function test_registration_preserves_the_selected_plan_checkout(): void
@@ -112,7 +114,9 @@ class CheckoutTest extends TestCase
         auth()->logout();
         $url = route('portal.checkout.show', ['packages' => [$this->plan->uuid]]);
         $this->get($url)->assertRedirect(route('login'));
-        $this->post('/register', ['name' => 'Buyer', 'account_type' => 'individual', 'phone' => '+2348000000000', 'email' => 'buyer@example.test', 'password' => 'password', 'password_confirmation' => 'password'])->assertRedirect($url);
+        $this->post('/register', ['name' => 'Buyer', 'account_type' => 'individual', 'phone' => '+2348000000000', 'email' => 'buyer@example.test', 'password' => 'password', 'password_confirmation' => 'password'])->assertRedirect(route('login.two-factor'));
+        $buyer = User::where('email', 'buyer@example.test')->firstOrFail();
+        $this->verifyLoginCode($buyer)->assertRedirect($url);
     }
 
     public function test_checkout_displays_account_plan_and_admin_hosting_price(): void

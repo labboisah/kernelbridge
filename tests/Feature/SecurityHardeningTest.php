@@ -9,6 +9,7 @@ use App\Models\User;
 use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -36,8 +37,11 @@ final class SecurityHardeningTest extends TestCase
 
     public function test_authentication_and_entity_changes_have_structured_audits(): void
     {
+        Notification::fake();
         $user = User::factory()->create(['password' => 'correct-password']);
-        $this->post('/login', ['email' => $user->email, 'password' => 'correct-password'])->assertRedirect();
+        $this->post('/login', ['email' => $user->email, 'password' => 'correct-password'])
+            ->assertRedirect(route('login.two-factor'));
+        $this->verifyLoginCode($user)->assertRedirect();
         $this->assertDatabaseHas('audit_logs', ['action' => 'authentication.login', 'actor_id' => $user->id, 'entity_type' => $user->getMorphClass(), 'entity_id' => (string) $user->id]);
 
         $this->actingAs($user);

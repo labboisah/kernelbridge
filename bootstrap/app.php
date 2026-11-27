@@ -5,8 +5,9 @@ use App\Http\Middleware\AddSecurityHeaders;
 use App\Http\Middleware\AssignApiRequestId;
 use App\Http\Middleware\AuthenticateApiClient;
 use App\Http\Middleware\DatabasePermissionMiddleware;
-use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\EnsureApiClientScope;
+use App\Http\Middleware\EnsureEmailTwoFactorVerified;
+use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\LimitApiClientRequests;
 use App\Http\Middleware\LogApiRequest;
 use App\Support\ApiResponse;
@@ -35,6 +36,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'role' => RoleMiddleware::class,
             'permission' => DatabasePermissionMiddleware::class,
             'role_or_permission' => RoleOrPermissionMiddleware::class,
+            'two_factor' => EnsureEmailTwoFactorVerified::class,
             'api.request_id' => AssignApiRequestId::class,
             'api.security' => AddApiSecurityHeaders::class,
             'api.scope' => EnsureApiClientScope::class,

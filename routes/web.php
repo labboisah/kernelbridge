@@ -40,7 +40,7 @@ use Illuminate\Support\Facades\Route;
 
 Route::get('/', HomeController::class)->name('home');
 Route::post('/partners/{type}/register', [\App\Http\Controllers\Partner\RegistrationController::class, 'store'])->middleware(['guest', 'throttle:5,1'])->name('partners.register.store');
-Route::prefix('partner')->name('partner.')->middleware(['auth', 'verified'])->group(function () {
+Route::prefix('partner')->name('partner.')->middleware(['auth', 'two_factor', 'verified'])->group(function () {
     $controller = \App\Http\Controllers\Partner\PortalController::class;
     Route::get('/', [$controller, 'dashboard'])->middleware('permission:partner.dashboard')->name('dashboard');
     Route::get('/bank-details', [\App\Http\Controllers\Partner\BankDetailsController::class, 'edit'])->middleware('permission:partner.bank.manage')->name('bank.edit');
@@ -62,6 +62,7 @@ Route::prefix('partner')->name('partner.')->middleware(['auth', 'verified'])->gr
     Route::post('/clients/{customer}/invitation', [$controller, 'inviteCustomer'])->middleware(['permission:partner.client.invite', 'throttle:5,1'])->name('customers.invitation');
     Route::get('/clients/{customer}/subscriptions/create', [$controller, 'createCustomerSubscription'])->middleware('permission:partner.subscription.create')->name('customers.subscriptions.create');
     Route::get('/subscriptions', [$controller, 'subscriptions'])->middleware('permission:partner.subscription.view')->name('subscriptions');
+    Route::post('/subscriptions/{subscription:uuid}/activation-code', [$controller, 'resendActivationCode'])->middleware(['permission:partner.license.view', 'throttle:5,1'])->name('subscriptions.activation-code');
     Route::get('/activation-codes', [$controller, 'activationCodes'])->middleware('permission:partner.license.view')->name('activation-codes');
     Route::get('/invoices', [$controller, 'invoices'])->middleware('permission:partner.invoice.view')->name('invoices');
     Route::post('/invoices', [$controller, 'storeInvoice'])->middleware(['permission:partner.invoice.create', 'throttle:10,1'])->name('invoices.store');
@@ -85,7 +86,7 @@ Route::prefix('partner')->name('partner.')->middleware(['auth', 'verified'])->gr
 });
 Route::get('/partners', [\App\Http\Controllers\PublicSite\PartnerController::class, 'index'])->name('partners.index');
 Route::get('/partners/{type}/register', [\App\Http\Controllers\PublicSite\PartnerController::class, 'start'])->name('partners.register');
-Route::middleware(['auth', 'verified'])->group(function () {
+Route::middleware(['auth', 'two_factor', 'verified'])->group(function () {
     Route::get('/partners/{type}/onboarding', [\App\Http\Controllers\PublicSite\PartnerController::class, 'edit'])->middleware('permission:partner.application')->name('partners.onboarding');
     Route::post('/partners/{type}/onboarding', [\App\Http\Controllers\PublicSite\PartnerController::class, 'save'])->middleware(['permission:partner.application', 'throttle:10,1'])->name('partners.save');
     Route::get('/partner-applications/{application}/photo', [\App\Http\Controllers\PublicSite\PartnerController::class, 'photo'])->middleware('permission:partner.application|partner.manage')->name('partners.photo');
@@ -108,8 +109,8 @@ Route::get('/demo', [DemoController::class, 'create'])->name('demo');
 Route::post('/demo', [DemoController::class, 'store'])->middleware('throttle:5,1')->name('demo.store');
 Route::get('/payments/flutterwave/callback', [FlutterwavePaymentController::class, 'callback'])->middleware('throttle:30,1')->name('payments.flutterwave.callback');
 Route::post('/payments/flutterwave/webhook', [FlutterwavePaymentController::class, 'webhook'])->middleware('throttle:120,1')->name('payments.flutterwave.webhook');
-Route::get('/client-invitations/{token}', [\App\Http\Controllers\Customer\ClientInvitationController::class, 'show'])->middleware('throttle:30,1')->name('client-invitations.show');
-Route::post('/client-invitations/{token}', [\App\Http\Controllers\Customer\ClientInvitationController::class, 'accept'])->middleware('throttle:5,1')->name('client-invitations.accept');
+Route::get('/client-invitations/{token}', [\App\Http\Controllers\Customer\ClientInvitationController::class, 'show'])->middleware(['two_factor', 'throttle:30,1'])->name('client-invitations.show');
+Route::post('/client-invitations/{token}', [\App\Http\Controllers\Customer\ClientInvitationController::class, 'accept'])->middleware(['two_factor', 'throttle:5,1'])->name('client-invitations.accept');
 Route::middleware('signed')->group(function (): void {
     Route::get('/invoice/{invoice:uuid}', [CustomerInvoiceController::class, 'show'])->name('invoices.customer.show');
     Route::get('/quotation/{quotation:uuid}', [CustomerQuotationController::class, 'show'])->name('quotations.customer.show');
@@ -117,7 +118,7 @@ Route::middleware('signed')->group(function (): void {
     Route::post('/quotation/{quotation:uuid}/reject', [CustomerQuotationController::class, 'reject'])->name('quotations.customer.reject');
 });
 
-Route::middleware(['auth', 'verified'])->group(function (): void {
+Route::middleware(['auth', 'two_factor', 'verified'])->group(function (): void {
     Route::get('/dashboard', CustomerDashboardController::class)->middleware('permission:portal.dashboard')->name('dashboard');
     Route::get('/notifications', [\App\Http\Controllers\NotificationInboxController::class, 'index'])->middleware('permission:notification.inbox')->name('notifications.index');
     Route::get('/notification-attachments/{attachment:uuid}', \App\Http\Controllers\AdminNotificationAttachmentController::class)->middleware('permission:notification.inbox')->name('notifications.attachments.download');
@@ -295,7 +296,7 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
     });
 });
 
-Route::middleware('auth')->group(function () {
+Route::middleware(['auth', 'two_factor'])->group(function () {
     Route::get('/profile', [ProfileController::class, 'edit'])->middleware('permission:profile.manage')->name('profile.edit');
     Route::get('/profile/photo', [ProfileController::class, 'photo'])->middleware('permission:profile.manage')->name('profile.photo');
     Route::post('/profile/photo', [ProfileController::class, 'updatePhoto'])->middleware(['permission:profile.manage', 'throttle:10,1'])->name('profile.photo.update');

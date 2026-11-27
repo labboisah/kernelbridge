@@ -8,6 +8,7 @@ use App\Models\Invoice;
 use App\Models\User;
 use Database\Seeders\RoleAndPermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Notification;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
 
@@ -95,11 +96,15 @@ class InvoiceVatAndRolesTest extends TestCase
 
     public function test_partner_registration_assigns_specific_role(): void
     {
+        Notification::fake();
         foreach (['sales_agent' => 'agent', 'developer' => 'developer', 'investor' => 'investor'] as $type => $role) {
             auth()->logout();
-            $this->post('/partners/'.$type.'/register', ['name' => 'Partner', 'email' => $type.'@example.test', 'password' => 'password', 'password_confirmation' => 'password'])->assertRedirect();
-            $this->assertTrue(auth()->user()->hasRole($role));
-            $this->assertFalse(auth()->user()->hasRole('sales'));
+            $this->post('/partners/'.$type.'/register', ['name' => 'Partner', 'email' => $type.'@example.test', 'password' => 'password', 'password_confirmation' => 'password'])
+                ->assertRedirect(route('login.two-factor'));
+            $user = User::where('email', $type.'@example.test')->firstOrFail();
+            $this->verifyLoginCode($user)->assertRedirect(route('partners.onboarding', $type));
+            $this->assertTrue($user->fresh()->hasRole($role));
+            $this->assertFalse($user->fresh()->hasRole('sales'));
         }
     }
 }

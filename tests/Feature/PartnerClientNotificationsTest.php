@@ -6,9 +6,11 @@ use App\Domain\Finance\Services\PaymentManager;
 use App\Domain\Finance\Services\InvoiceManager;
 use App\Models\Customer;
 use App\Models\Invoice;
+use App\Models\LicenseActivationCode;
 use App\Models\PartnerApplication;
 use App\Models\PartnerClientInvitation;
 use App\Models\Plan;
+use App\Models\SoftwareLicense;
 use App\Models\User;
 use App\Notifications\PartnerClientMilestone;
 use App\Notifications\PartnerClientRegistered;
@@ -75,8 +77,9 @@ class PartnerClientNotificationsTest extends TestCase
             ->assertInertia(fn (Assert $page) => $page->component('Auth/ClientInvitation')->where('existingAccount', false));
         $this->post(route('client-invitations.accept', $token), [
             'name' => 'Client User', 'password' => 'password123', 'password_confirmation' => 'password123',
-        ])->assertRedirect(route('portal.services.index'));
+        ])->assertRedirect(route('login.two-factor'));
         $user = User::where('email', 'client@example.test')->firstOrFail();
+        $this->verifyLoginCode($user)->assertRedirect(route('portal.services.index'));
         $this->assertTrue($user->hasVerifiedEmail());
         $this->assertTrue(Hash::check('password123', $user->password));
         $this->assertTrue($user->hasRole('customer'));
@@ -159,7 +162,9 @@ class PartnerClientNotificationsTest extends TestCase
         auth()->logout();
         $this->post(route('client-invitations.accept', $token), [
             'name' => 'Client User', 'password' => 'password123', 'password_confirmation' => 'password123',
-        ])->assertRedirect(route('portal.services.index'));
+        ])->assertRedirect(route('login.two-factor'));
+        $user = User::where('email', $client->email)->firstOrFail();
+        $this->verifyLoginCode($user)->assertRedirect(route('portal.services.index'));
         $subscription = $client->subscriptions()->firstOrFail();
         $this->get(route('portal.licenses.index'))->assertInertia(fn (Assert $page) => $page
             ->where('licenses.0.guide_url', route('portal.services.installation-guide', $subscription)));
@@ -211,5 +216,93 @@ class PartnerClientNotificationsTest extends TestCase
         $this->assertCount(2, $messages);
         $this->assertStringContainsString('Payment confirmed', $messages[0]->subject);
         $this->assertStringContainsString('Installation and activation', $messages[1]->subject);
+    }
+
+    public function test_paid_partner_subscription_issues_initial_installation_code_for_direct_products(): void
+    {
+        $partner = $this->partner();
+        [$client] = $this->registerClient($partner);
+        $plan = Plan::factory()->create(['price' => '10000.00']);
+        $plan->product->forceFill(['licensing_mode' => 'direct'])->save();
+        $this->actingAs($partner)->post(route('partner.invoices.store'), [
+            'customer_uuid' => $client->uuid, 'plan_uuid' => $plan->uuid,
+        ])->assertSessionHasNoErrors();
+        $invoice = Invoice::firstOrFail();
+        $payment = app(PaymentManager::class)->create([
+            'customer_id' => $client->id, 'amount' => $invoice->balance, 'currency' => $invoice->currency,
+            'payment_method' => 'cash', 'transaction_reference' => 'DIRECT-CLIENT-PAYMENT', 'payment_date' => today(),
+        ], $partner);
+
+        app(PaymentManager::class)->verify($payment, [['invoice_id' => $invoice->id, 'amount' => $invoice->balance]], $partner);
+
+        $license = SoftwareLicense::query()->where('customer_id', $client->id)->sole();
+        $code = LicenseActivationCode::query()->where('software_license_id', $license->id)->sole();
+        $this->assertSame('issued', $code->status);
+        $this->assertSame($plan->product_id, $code->product_id);
+        $this->assertNotNull($code->expires_at);
+        $this->assertDatabaseHas('client_setup_bundles', ['subscription_id' => $license->subscription_id]);
+
+        $clientCode = null;
+        Notification::assertSentOnDemand(PartnerClientMilestone::class, function ($notification, $channels, AnonymousNotifiable $recipient) use ($client, &$clientCode) {
+            if (($recipient->routes['mail'] ?? null) !== $client->email || ! str_contains($notification->subject, 'Installation and activation')) {
+                return false;
+            }
+            preg_match('/KBI-[A-Z0-9]{8}-[A-Z0-9]{8}-[A-Z0-9]{8}/', $notification->message, $matches);
+            $clientCode = $matches[0] ?? null;
+
+            return $clientCode !== null;
+        });
+        $this->assertNotNull($clientCode);
+        $this->assertTrue(password_verify($clientCode, $code->code_hash));
+        Notification::assertSentTo($partner, PartnerClientMilestone::class, fn ($notification) =>
+            str_contains($notification->subject, 'Installation and activation')
+            && ! str_contains($notification->message, $clientCode));
+    }
+
+    public function test_partner_can_regenerate_and_email_code_for_paid_client_subscription(): void
+    {
+        $partner = $this->partner();
+        [$client] = $this->registerClient($partner);
+        $plan = Plan::factory()->create(['price' => '10000.00']);
+        $plan->product->forceFill(['licensing_mode' => 'direct'])->save();
+        $this->actingAs($partner)->post(route('partner.invoices.store'), [
+            'customer_uuid' => $client->uuid, 'plan_uuid' => $plan->uuid,
+        ])->assertSessionHasNoErrors();
+        $invoice = Invoice::firstOrFail();
+        $payment = app(PaymentManager::class)->create([
+            'customer_id' => $client->id, 'amount' => $invoice->balance, 'currency' => $invoice->currency,
+            'payment_method' => 'cash', 'transaction_reference' => 'DIRECT-RESEND-PAYMENT', 'payment_date' => today(),
+        ], $partner);
+        app(PaymentManager::class)->verify($payment, [['invoice_id' => $invoice->id, 'amount' => $invoice->balance]], $partner);
+        $subscription = $client->subscriptions()->sole();
+        $firstCode = LicenseActivationCode::query()->sole();
+
+        $this->actingAs($partner)->get(route('partner.subscriptions'))->assertInertia(fn (Assert $page) => $page
+            ->where('subscriptions.data.0.can_generate_activation_code', true)
+            ->where('subscriptions.data.0.has_issued_activation_code', true));
+        $this->post(route('partner.subscriptions.activation-code', $subscription->uuid))
+            ->assertSessionHasNoErrors()
+            ->assertSessionHas('success');
+
+        $firstCode->refresh();
+        $newCode = LicenseActivationCode::query()->where('status', 'issued')->sole();
+        $this->assertSame('revoked', $firstCode->status);
+        $this->assertSame($firstCode->id, $newCode->replacement_of_id);
+
+        $emailedCode = null;
+        Notification::assertSentOnDemand(PartnerClientMilestone::class, function ($notification, $channels, AnonymousNotifiable $recipient) use ($client, &$emailedCode) {
+            if (($recipient->routes['mail'] ?? null) !== $client->email || ! str_contains($notification->subject, 'New installation activation code')) {
+                return false;
+            }
+            preg_match('/KBI-[A-Z0-9]{8}-[A-Z0-9]{8}-[A-Z0-9]{8}/', $notification->message, $matches);
+            $emailedCode = $matches[0] ?? null;
+
+            return $emailedCode !== null;
+        });
+        $this->assertNotNull($emailedCode);
+        $this->assertTrue(password_verify($emailedCode, $newCode->code_hash));
+
+        $otherPartner = $this->partner();
+        $this->actingAs($otherPartner)->post(route('partner.subscriptions.activation-code', $subscription->uuid))->assertNotFound();
     }
 }
