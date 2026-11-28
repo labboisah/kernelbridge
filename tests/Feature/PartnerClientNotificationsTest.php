@@ -280,7 +280,12 @@ class PartnerClientNotificationsTest extends TestCase
         $this->actingAs($partner)->get(route('partner.subscriptions'))->assertInertia(fn (Assert $page) => $page
             ->where('subscriptions.data.0.can_generate_activation_code', true)
             ->where('subscriptions.data.0.has_issued_activation_code', true));
-        $this->post(route('partner.subscriptions.activation-code', $subscription->uuid))
+        $this->get(route('partner.activation-codes'))->assertInertia(fn (Assert $page) => $page
+            ->has('subscriptions', 1)
+            ->where('subscriptions.0.uuid', $subscription->uuid)
+            ->where('subscriptions.0.has_issued_activation_code', true));
+        $this->from(route('partner.activation-codes'))
+            ->post(route('partner.subscriptions.activation-code', $subscription->uuid))
             ->assertSessionHasNoErrors()
             ->assertSessionHas('success')
             ->assertSessionHas('activation_code.code');
@@ -303,11 +308,12 @@ class PartnerClientNotificationsTest extends TestCase
         $this->assertNotNull($emailedCode);
         $this->assertTrue(password_verify($emailedCode, $newCode->code_hash));
         $this->assertSame($emailedCode, session('activation_code.code'));
-        $this->get(route('partner.subscriptions'))->assertInertia(fn (Assert $page) => $page
+        $this->get(route('partner.activation-codes'))->assertInertia(fn (Assert $page) => $page
             ->where('flash.activation_code.code', $emailedCode)
             ->where('flash.activation_code.customer', $client->name)
             ->where('flash.activation_code.product', $plan->product->name)
-            ->has('flash.activation_code.expires_at'));
+            ->has('flash.activation_code.expires_at')
+            ->has('codes.data', 2));
 
         $otherPartner = $this->partner();
         $this->actingAs($otherPartner)->post(route('partner.subscriptions.activation-code', $subscription->uuid))->assertNotFound();

@@ -302,7 +302,36 @@ class PortalController extends Controller
             'created_at' => $code->created_at->toIso8601String(),
         ]);
 
-        return Inertia::render('Partner/ActivationCodes', ['codes' => $codes]);
+        $subscriptions = Subscription::whereIn('customer_id', $clientIds)
+            ->with([
+                'customer:id,name,email',
+                'product:id,name,licensing_mode',
+                'invoice:id,status,balance',
+                'license:id,subscription_id,status',
+                'license.activationCodes:id,software_license_id,status,created_at',
+            ])
+            ->latest()
+            ->get(['id', 'uuid', 'customer_id', 'product_id', 'invoice_id', 'subscription_number', 'status'])
+            ->filter(fn (Subscription $subscription) => in_array($subscription->status->value, ['active', 'grace'], true)
+                && $subscription->invoice?->status->value === 'paid'
+                && (float) $subscription->invoice->balance === 0.0
+                && $subscription->license?->status === 'active'
+                && in_array($subscription->product->licensing_mode, ['direct', 'hybrid'], true)
+                && filled($subscription->customer->email))
+            ->map(fn (Subscription $subscription) => [
+                'uuid' => $subscription->uuid,
+                'subscription_number' => $subscription->subscription_number,
+                'customer' => $subscription->customer->name,
+                'product' => $subscription->product->name,
+                'has_issued_activation_code' => $subscription->license->activationCodes
+                    ->contains(fn (LicenseActivationCode $code) => $code->status === 'issued'),
+            ])
+            ->values();
+
+        return Inertia::render('Partner/ActivationCodes', [
+            'codes' => $codes,
+            'subscriptions' => $subscriptions,
+        ]);
     }
 
     public function updateCustomer(Request $request, string $customer)
