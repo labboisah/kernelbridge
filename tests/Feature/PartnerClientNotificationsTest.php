@@ -282,7 +282,8 @@ class PartnerClientNotificationsTest extends TestCase
             ->where('subscriptions.data.0.has_issued_activation_code', true));
         $this->post(route('partner.subscriptions.activation-code', $subscription->uuid))
             ->assertSessionHasNoErrors()
-            ->assertSessionHas('success');
+            ->assertSessionHas('success')
+            ->assertSessionHas('activation_code.code');
 
         $firstCode->refresh();
         $newCode = LicenseActivationCode::query()->where('status', 'issued')->sole();
@@ -301,6 +302,12 @@ class PartnerClientNotificationsTest extends TestCase
         });
         $this->assertNotNull($emailedCode);
         $this->assertTrue(password_verify($emailedCode, $newCode->code_hash));
+        $this->assertSame($emailedCode, session('activation_code.code'));
+        $this->get(route('partner.subscriptions'))->assertInertia(fn (Assert $page) => $page
+            ->where('flash.activation_code.code', $emailedCode)
+            ->where('flash.activation_code.customer', $client->name)
+            ->where('flash.activation_code.product', $plan->product->name)
+            ->has('flash.activation_code.expires_at'));
 
         $otherPartner = $this->partner();
         $this->actingAs($otherPartner)->post(route('partner.subscriptions.activation-code', $subscription->uuid))->assertNotFound();

@@ -277,7 +277,14 @@ class PortalController extends Controller
             $unusedCode !== null,
         );
 
-        return back()->with('success', 'A fresh activation code was generated and queued for the client. Any unused previous code was invalidated.');
+        return back()
+            ->with('success', 'A fresh activation code was generated and emailed to the client. Any unused previous code was invalidated.')
+            ->with('activation_code', [
+                'code' => $issued['code'],
+                'expires_at' => $issued['activation_code']->expires_at->toIso8601String(),
+                'customer' => $subscription->customer->name,
+                'product' => $subscription->product->name,
+            ]);
     }
 
     public function activationCodes(Request $request)

@@ -18,6 +18,14 @@ const generateActivationCode = subscription => {
         onFinish: () => { processing.value = null; },
     });
 };
+const copy = async code => {
+    try {
+        await navigator.clipboard.writeText(code);
+    } catch {
+        alert('Select and copy the activation code manually.');
+    }
+};
+const dateTime = value => value ? new Date(value).toLocaleString() : 'Not set';
 </script>
 
 <template>
@@ -26,6 +34,18 @@ const generateActivationCode = subscription => {
         <p class="mb-6 text-sm text-slate-600">Paid direct or hybrid subscriptions can generate a fresh 24-hour installation code here. Reissuing a code invalidates any unused previous code.</p>
         <Link :href="route('partner.invoices')" class="mb-6 inline-block font-semibold text-cyan-700">Prepare a subscription invoice</Link>
         <p v-if="$page.props.flash.success" class="success-message mb-5">{{ $page.props.flash.success }}</p>
+        <section v-if="$page.props.flash.activation_code" class="mb-6 rounded-xl border border-emerald-300 bg-emerald-50 p-5">
+            <h2 class="font-bold text-emerald-900">New installation activation code</h2>
+            <p class="mt-1 text-sm text-emerald-800">
+                {{ $page.props.flash.activation_code.product }} for {{ $page.props.flash.activation_code.customer }}.
+                This code is shown once, expires after 24 hours, and replaces any previous unused code.
+            </p>
+            <div class="mt-3 flex flex-wrap items-center gap-3">
+                <code class="rounded-lg bg-white px-3 py-2 font-bold ring-1 ring-emerald-300">{{ $page.props.flash.activation_code.code }}</code>
+                <button type="button" class="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-bold text-white" @click="copy($page.props.flash.activation_code.code)">Copy code</button>
+            </div>
+            <p class="mt-2 text-xs text-emerald-800">Expires {{ dateTime($page.props.flash.activation_code.expires_at) }}. Keep this code private and share it securely with the client for installation.</p>
+        </section>
         <p v-if="$page.props.errors.activation_code || $page.props.errors.license" role="alert" class="mb-5 text-red-700">{{ $page.props.errors.activation_code || $page.props.errors.license }}</p>
         <div class="space-y-3">
             <article v-for="subscription in subscriptions.data" :key="subscription.uuid" class="rounded-xl bg-white p-5">

@@ -8,7 +8,7 @@ const date = value => value ? new Date(value).toLocaleString() : 'Not set';
 
 <template>
     <PartnerLayout title="Client activation codes">
-        <p class="mb-6 text-slate-600">View activation code status for your clients. Codes are shown only once when issued and cannot be retrieved here; clients manage code issuance in their own portal.</p>
+        <p class="mb-6 text-slate-600">View activation code status for your clients. To display a fresh code for an eligible paid subscription, open Client subscriptions and generate a replacement. Codes are shown only once and expire after 24 hours.</p>
         <div class="space-y-3">
             <article v-for="code in codes.data" :key="code.uuid" class="rounded-xl bg-white p-5">
                 <h2 class="font-bold">{{ code.customer }} · {{ code.product }}</h2>
